@@ -128,7 +128,7 @@ function App() {
       formData.append('ct_image', ctImage.file);
       formData.append('mri_image', mriImage.file);
       
-      const response = await fetch('http://localhost:8000/predict', {
+      const response = await fetch('https://brain-tumor-backend-6kvr.onrender.com/predict', {
         method: 'POST',
         body: formData
       });
