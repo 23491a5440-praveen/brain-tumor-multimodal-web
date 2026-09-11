@@ -3,6 +3,7 @@ import base64
 import io
 import numpy as np
 from pathlib import Path
+import gc
 
 import torch
 import torch.nn.functional as F
@@ -140,28 +141,57 @@ async def predict(
     ct_tensor = prepare_image(ct_data)
     mri_tensor = prepare_image(mri_data)
 
-    cam_ct = GradCAM(model, model.ct_branch.features[-1][0])
-    cam_mri = GradCAM(model, model.mri_branch.features[-1][0])
-
-    with torch.enable_grad():
+    # Phase 1: Normal Prediction
+    with torch.no_grad():
         outputs = model(
             ct_images=ct_tensor,
             mri_images=mri_tensor
         )
-
         probabilities = torch.softmax(outputs, dim=1)	
         predicted_class = torch.argmax(probabilities, dim=1).item()
         confidence = probabilities[0, predicted_class].item() * 100
-        
-        model.zero_grad()
-        class_loss = outputs[0, predicted_class]
-        class_loss.backward()
 
-    heatmap_ct = cam_ct.generate()
-    heatmap_mri = cam_mri.generate()
+    # Phase 2: CT Grad-CAM
+    for param in model.mri_branch.parameters():
+        param.requires_grad = False
+    for param in model.ct_branch.parameters():
+        param.requires_grad = True
+
+    cam_ct = GradCAM(model, model.ct_branch.features[-1][0])
+    with torch.enable_grad():
+        outputs_ct = model(ct_images=ct_tensor, mri_images=mri_tensor)
+        model.zero_grad()
+        outputs_ct[0, predicted_class].backward()
     
+    heatmap_ct = cam_ct.generate()
     cam_ct.remove()
+    
+    del outputs_ct
+    del cam_ct
+    gc.collect()
+
+    # Phase 3: MRI Grad-CAM
+    for param in model.ct_branch.parameters():
+        param.requires_grad = False
+    for param in model.mri_branch.parameters():
+        param.requires_grad = True
+
+    cam_mri = GradCAM(model, model.mri_branch.features[-1][0])
+    with torch.enable_grad():
+        outputs_mri = model(ct_images=ct_tensor, mri_images=mri_tensor)
+        model.zero_grad()
+        outputs_mri[0, predicted_class].backward()
+    
+    heatmap_mri = cam_mri.generate()
     cam_mri.remove()
+    
+    del outputs_mri
+    del cam_mri
+    gc.collect()
+    
+    # Restore requires_grad to True for both
+    for param in model.ct_branch.parameters():
+        param.requires_grad = True
 
     ct_base64 = apply_colormap_and_encode(heatmap_ct, ct_tensor) if heatmap_ct is not None else None
     mri_base64 = apply_colormap_and_encode(heatmap_mri, mri_tensor) if heatmap_mri is not None else None
