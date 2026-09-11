@@ -7,7 +7,7 @@ class NeuroScanModel(nn.Module):
         super(NeuroScanModel, self).__init__()
         
         # Branch 1: CT Scan EfficientNet-B0
-        self.ct_branch = efficientnet_b0(weights=EfficientNet_B0_Weights.DEFAULT)
+        self.ct_branch = efficientnet_b0(weights=None)
         # Replace the classifier head to output a 512-dimensional feature vector
         in_features_ct = self.ct_branch.classifier[1].in_features
         self.ct_branch.classifier = nn.Sequential(
@@ -16,7 +16,7 @@ class NeuroScanModel(nn.Module):
         )
         
         # Branch 2: MRI Scan EfficientNet-B0
-        self.mri_branch = efficientnet_b0(weights=EfficientNet_B0_Weights.DEFAULT)
+        self.mri_branch = efficientnet_b0(weights=None)
         # Replace the classifier head to output a 512-dimensional feature vector
         in_features_mri = self.mri_branch.classifier[1].in_features
         self.mri_branch.classifier = nn.Sequential(
