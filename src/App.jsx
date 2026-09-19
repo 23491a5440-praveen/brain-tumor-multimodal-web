@@ -355,17 +355,17 @@ function App() {
                       <>
                         <p style={{ color: 'var(--text-secondary)', fontSize: '0.85rem', letterSpacing: '0.1em', margin: '0 0 0.25rem', fontWeight: 600 }}>POSITIVE FOR MASS / LESION</p>
                         <h2 style={{ color: 'var(--error-color)', margin: '0', fontSize: '1.75rem', fontWeight: 700 }}>Tumor Detected</h2>
+                        
+                        <div style={{ marginTop: '0.75rem', display: 'inline-block', background: 'rgba(255,255,255,0.05)', padding: '0.35rem 0.75rem', borderRadius: '6px', border: '1px solid rgba(255,255,255,0.1)' }}>
+                          <p style={{ color: results.backendData.confidence >= 90 ? 'var(--success-color)' : (results.backendData.confidence >= 70 ? 'var(--accent-cyan)' : 'var(--error-color)'), margin: 0, fontSize: '0.85rem', fontWeight: 600 }}>
+                            {results.backendData.confidence >= 90 ? 'High Confidence' : (results.backendData.confidence >= 70 ? 'Moderate Confidence' : 'Low Confidence')}
+                          </p>
+                          <p style={{ color: 'var(--text-secondary)', margin: '0.15rem 0 0', fontSize: '0.7rem' }}>
+                            AI confidence level only. Not a measure of clinical severity.
+                          </p>
+                        </div>
                       </>
                     )}
-                    
-                    <div style={{ marginTop: '0.75rem', display: 'inline-block', background: 'rgba(255,255,255,0.05)', padding: '0.35rem 0.75rem', borderRadius: '6px', border: '1px solid rgba(255,255,255,0.1)' }}>
-                      <p style={{ color: results.backendData.confidence >= 90 ? 'var(--success-color)' : (results.backendData.confidence >= 70 ? 'var(--accent-cyan)' : 'var(--error-color)'), margin: 0, fontSize: '0.85rem', fontWeight: 600 }}>
-                        {results.backendData.confidence >= 90 ? 'High Confidence' : (results.backendData.confidence >= 70 ? 'Moderate Confidence' : 'Low Confidence')}
-                      </p>
-                      <p style={{ color: 'var(--text-secondary)', margin: '0.15rem 0 0', fontSize: '0.7rem' }}>
-                        * AI confidence level only. Not a measure of clinical severity.
-                      </p>
-                    </div>
                   </div>
 
                   <div style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.05)', borderRadius: '8px', padding: '1rem', marginBottom: '1.25rem' }}>
@@ -393,14 +393,12 @@ function App() {
                     </div>
                   )}
 
-                  {results.backendData.explanation && (
-                    <>
-                      <p style={{ color: 'var(--text-secondary)', margin: '0 0 0.35rem', fontSize: '0.85rem', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Explanation</p>
-                      <p style={{ color: 'var(--text-primary)', margin: '0 0 1.25rem', fontSize: '0.95rem', lineHeight: '1.5' }}>
-                        {results.backendData.explanation}
-                      </p>
-                    </>
-                  )}
+                  <>
+                    <p style={{ color: 'var(--text-secondary)', margin: '0 0 0.35rem', fontSize: '0.85rem', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Explanation</p>
+                    <p style={{ color: 'var(--text-primary)', margin: '0 0 1.25rem', fontSize: '0.95rem', lineHeight: '1.5' }}>
+                      The prediction is based on learned image features extracted from the uploaded CT and MRI scans using EfficientNet-B0 and combined through late fusion. This result is not a medical diagnosis.
+                    </p>
+                  </>
 
                   <div style={{ display: 'flex', alignItems: 'flex-start', gap: '0.75rem', marginTop: '1.25rem', borderTop: '1px solid rgba(255,255,255,0.1)', paddingTop: '1rem' }}>
                     <AlertTriangle size={18} color="var(--text-secondary)" style={{ flexShrink: 0, marginTop: '2px' }} />
