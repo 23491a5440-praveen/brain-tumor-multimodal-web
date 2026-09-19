@@ -345,26 +345,32 @@ function App() {
                 </div>
                 
                 <div style={{ background: 'rgba(6, 182, 212, 0.05)', padding: '1.5rem', borderRadius: '12px', border: '1px solid rgba(6, 182, 212, 0.2)' }}>
-                  {results.backendData.prediction === 'Healthy' ? (
-                    <div style={{ marginBottom: '1.5rem', borderLeft: '4px solid var(--success-color)', paddingLeft: '1rem' }}>
-                      <p style={{ color: 'var(--text-secondary)', fontSize: '0.85rem', letterSpacing: '0.1em', margin: '0 0 0.25rem', fontWeight: 600 }}>NEGATIVE FOR MASS / LESION</p>
-                      <h2 style={{ color: 'var(--success-color)', margin: '0', fontSize: '1.75rem', fontWeight: 700 }}>Normal / Non-Tumor</h2>
+                  <div style={{ marginBottom: '1.5rem', borderLeft: `4px solid ${results.backendData.prediction === 'Healthy' ? 'var(--success-color)' : 'var(--error-color)'}`, paddingLeft: '1rem' }}>
+                    {results.backendData.prediction === 'Healthy' ? (
+                      <>
+                        <p style={{ color: 'var(--text-secondary)', fontSize: '0.85rem', letterSpacing: '0.1em', margin: '0 0 0.25rem', fontWeight: 600 }}>NEGATIVE FOR MASS / LESION</p>
+                        <h2 style={{ color: 'var(--success-color)', margin: '0', fontSize: '1.75rem', fontWeight: 700 }}>Normal / Non-Tumor</h2>
+                      </>
+                    ) : (
+                      <>
+                        <p style={{ color: 'var(--text-secondary)', fontSize: '0.85rem', letterSpacing: '0.1em', margin: '0 0 0.25rem', fontWeight: 600 }}>POSITIVE FOR MASS / LESION</p>
+                        <h2 style={{ color: 'var(--error-color)', margin: '0', fontSize: '1.75rem', fontWeight: 700 }}>Tumor Detected</h2>
+                      </>
+                    )}
+                    
+                    <div style={{ marginTop: '0.75rem', display: 'inline-block', background: 'rgba(255,255,255,0.05)', padding: '0.35rem 0.75rem', borderRadius: '6px', border: '1px solid rgba(255,255,255,0.1)' }}>
+                      <p style={{ color: results.backendData.confidence >= 90 ? 'var(--success-color)' : (results.backendData.confidence >= 70 ? 'var(--accent-cyan)' : 'var(--error-color)'), margin: 0, fontSize: '0.85rem', fontWeight: 600 }}>
+                        {results.backendData.confidence >= 90 ? 'High Confidence' : (results.backendData.confidence >= 70 ? 'Moderate Confidence' : 'Low Confidence')}
+                      </p>
+                      <p style={{ color: 'var(--text-secondary)', margin: '0.15rem 0 0', fontSize: '0.7rem' }}>
+                        * AI confidence level only. Not a measure of clinical severity.
+                      </p>
                     </div>
-                  ) : (
-                    <div style={{ marginBottom: '1.5rem', borderLeft: '4px solid var(--error-color)', paddingLeft: '1rem' }}>
-                      <p style={{ color: 'var(--text-secondary)', fontSize: '0.85rem', letterSpacing: '0.1em', margin: '0 0 0.25rem', fontWeight: 600 }}>POSITIVE FOR MASS / LESION</p>
-                      <h2 style={{ color: 'var(--error-color)', margin: '0', fontSize: '1.75rem', fontWeight: 700 }}>Tumor Detected</h2>
-                    </div>
-                  )}
+                  </div>
 
                   <div style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.05)', borderRadius: '8px', padding: '1rem', marginBottom: '1.25rem' }}>
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', marginBottom: '0.5rem' }}>
-                      <div>
-                        <p style={{ color: 'var(--text-secondary)', margin: 0, fontSize: '0.85rem', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Confidence Score</p>
-                        <p style={{ color: results.backendData.confidence >= 90 ? 'var(--success-color)' : (results.backendData.confidence >= 70 ? 'var(--accent-cyan)' : 'var(--error-color)'), margin: '0.25rem 0 0', fontSize: '0.75rem', textTransform: 'uppercase', letterSpacing: '0.05em', fontWeight: 600 }}>
-                          AI Confidence Level: {results.backendData.confidence >= 90 ? 'High' : (results.backendData.confidence >= 70 ? 'Medium' : 'Low')}
-                        </p>
-                      </div>
+                      <p style={{ color: 'var(--text-secondary)', margin: 0, fontSize: '0.85rem', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Confidence Score</p>
                       <h3 style={{ color: 'var(--text-primary)', margin: 0, fontSize: '1.25rem' }}>
                         {results.backendData.confidence}%
                       </h3>
