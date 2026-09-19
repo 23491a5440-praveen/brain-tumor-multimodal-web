@@ -27,7 +27,11 @@ app = FastAPI(title="NeuroScan AI API")
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["https://multimodelbraintumorclassification.netlify.app"],
+    allow_origins=[
+        "https://multimodelbraintumorclassification.netlify.app",
+        "http://localhost:5173",
+        "http://localhost:5174"
+    ],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

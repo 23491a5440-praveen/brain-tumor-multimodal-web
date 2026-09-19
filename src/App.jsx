@@ -334,34 +334,58 @@ function App() {
             ) : results && results.backendData ? (
               <div style={{ textAlign: 'left', width: '100%', animation: 'fadeIn 0.5s ease' }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', marginBottom: '1.5rem' }}>
-                  <CheckCircle size={28} color="var(--success-color)" />
+                  <Activity size={28} color="var(--accent-cyan)" />
                   <h3 style={{ fontSize: '1.2rem', color: 'var(--text-primary)', margin: 0 }}>
-                    Analysis Request Successful
+                    Clinical Analysis Report
                   </h3>
                 </div>
-                <div style={{ background: 'rgba(6, 182, 212, 0.08)', padding: '1.5rem', borderRadius: '12px', border: '1px solid var(--card-border)' }}>
-                  <p style={{ color: 'var(--text-secondary)', margin: '0 0 0.5rem' }}>Prediction</p>
-                  <h2 style={{ color: results.backendData.prediction === 'Tumor' ? 'var(--accent-cyan)' : 'var(--success-color)', margin: '0 0 1rem', fontSize: '2rem' }}>
-                    {results.backendData.prediction}
-                  </h2>
+                
+                <div style={{ background: 'rgba(6, 182, 212, 0.05)', padding: '1.5rem', borderRadius: '12px', border: '1px solid rgba(6, 182, 212, 0.2)' }}>
+                  {results.backendData.prediction === 'Healthy' ? (
+                    <div style={{ marginBottom: '1.5rem', borderLeft: '4px solid var(--success-color)', paddingLeft: '1rem' }}>
+                      <p style={{ color: 'var(--text-secondary)', fontSize: '0.85rem', letterSpacing: '0.1em', margin: '0 0 0.25rem', fontWeight: 600 }}>NEGATIVE FOR MASS / LESION</p>
+                      <h2 style={{ color: 'var(--success-color)', margin: '0', fontSize: '1.75rem', fontWeight: 700 }}>Normal / Non-Tumor</h2>
+                    </div>
+                  ) : (
+                    <div style={{ marginBottom: '1.5rem', borderLeft: '4px solid var(--error-color)', paddingLeft: '1rem' }}>
+                      <p style={{ color: 'var(--text-secondary)', fontSize: '0.85rem', letterSpacing: '0.1em', margin: '0 0 0.25rem', fontWeight: 600 }}>POSITIVE FOR MASS / LESION</p>
+                      <h2 style={{ color: 'var(--error-color)', margin: '0', fontSize: '1.75rem', fontWeight: 700 }}>Tumor Detected</h2>
+                    </div>
+                  )}
 
-                  <p style={{ color: 'var(--text-secondary)', margin: '0 0 0.35rem' }}>Confidence</p>
-                  <h3 style={{ color: 'var(--text-primary)', margin: '0 0 1.25rem' }}>
-                    {results.backendData.confidence}%
-                  </h3>
+                  <div style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.05)', borderRadius: '8px', padding: '1rem', marginBottom: '1.25rem' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', marginBottom: '0.5rem' }}>
+                      <p style={{ color: 'var(--text-secondary)', margin: 0, fontSize: '0.85rem', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Confidence Score</p>
+                      <h3 style={{ color: 'var(--text-primary)', margin: 0, fontSize: '1.25rem' }}>
+                        {results.backendData.confidence}%
+                      </h3>
+                    </div>
+                    <div style={{ width: '100%', height: '8px', background: 'rgba(255,255,255,0.1)', borderRadius: '4px', overflow: 'hidden' }}>
+                      <div style={{ 
+                        height: '100%', 
+                        width: `${results.backendData.confidence}%`, 
+                        background: results.backendData.prediction === 'Healthy' ? 'var(--success-color)' : 'var(--error-color)',
+                        borderRadius: '4px',
+                        transition: 'width 1s ease-in-out'
+                      }}></div>
+                    </div>
+                  </div>
 
                   {results.backendData.explanation && (
                     <>
-                      <p style={{ color: 'var(--text-secondary)', margin: '0 0 0.35rem' }}>Explanation</p>
+                      <p style={{ color: 'var(--text-secondary)', margin: '0 0 0.35rem', fontSize: '0.85rem', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Explanation</p>
                       <p style={{ color: 'var(--text-primary)', margin: '0 0 1.25rem', fontSize: '0.95rem', lineHeight: '1.5' }}>
                         {results.backendData.explanation}
                       </p>
                     </>
                   )}
 
-                  <p style={{ color: 'var(--text-secondary)', marginTop: '1.25rem', fontSize: '0.85rem', lineHeight: '1.5', borderTop: '1px solid rgba(255,255,255,0.1)', paddingTop: '1rem' }}>
-                    AI-assisted result for research and educational purposes only. This is not a medical diagnosis.
-                  </p>
+                  <div style={{ display: 'flex', alignItems: 'flex-start', gap: '0.75rem', marginTop: '1.25rem', borderTop: '1px solid rgba(255,255,255,0.1)', paddingTop: '1rem' }}>
+                    <AlertTriangle size={18} color="var(--text-secondary)" style={{ flexShrink: 0, marginTop: '2px' }} />
+                    <p style={{ color: 'var(--text-secondary)', margin: 0, fontSize: '0.85rem', lineHeight: '1.4' }}>
+                      AI-assisted result for research and educational purposes only. This is not a medical diagnosis.
+                    </p>
+                  </div>
                 </div>
 
                 {/* Grad-CAM Section */}
