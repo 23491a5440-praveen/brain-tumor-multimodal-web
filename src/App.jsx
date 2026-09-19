@@ -636,7 +636,7 @@ function App() {
           <div className="about-card">
             <div className="about-icon"><Info size={28} /></div>
             <h3>Project Overview</h3>
-            <p>A final-year medical AI research project demonstrating how combining multiple imaging modalities can provide a more comprehensive analysis of brain tumors than a single scan alone.</p>
+            <p>A medical AI research project demonstrating how combining multiple imaging modalities can provide a more comprehensive analysis of brain tumors than a single scan alone.</p>
           </div>
 
           <div className="about-card">
@@ -656,7 +656,7 @@ function App() {
           <div className="notice-icon"><AlertTriangle size={32} /></div>
           <div>
             <h3>Research & Educational Prototype</h3>
-            <p>This application is developed strictly for academic, research, and educational purposes as a final-year project prototype. It is not an FDA-approved medical device, does not provide real clinical diagnoses, and should never be used as a substitute for professional medical care.</p>
+            <p>This application is developed strictly for academic, research, and educational purposes as a project prototype. It is not an FDA-approved medical device, does not provide real clinical diagnoses, and should never be used as a substitute for professional medical care.</p>
           </div>
         </div>
       </section>
