@@ -122,6 +122,7 @@ function App() {
     }
     
     setIsAnalyzing(true);
+    const startTime = performance.now();
     
     try {
       const formData = new FormData();
@@ -138,9 +139,12 @@ function App() {
       }
       
       const data = await response.json();
+      const endTime = performance.now();
+      const latencyMs = Math.round(endTime - startTime);
       
       setResults({
-        backendData: data
+        backendData: data,
+        latency: latencyMs
       });
     } catch (err) {
       setErrorMsg('Analysis service is unavailable. Please try again.');
@@ -355,7 +359,12 @@ function App() {
 
                   <div style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.05)', borderRadius: '8px', padding: '1rem', marginBottom: '1.25rem' }}>
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', marginBottom: '0.5rem' }}>
-                      <p style={{ color: 'var(--text-secondary)', margin: 0, fontSize: '0.85rem', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Confidence Score</p>
+                      <div>
+                        <p style={{ color: 'var(--text-secondary)', margin: 0, fontSize: '0.85rem', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Confidence Score</p>
+                        <p style={{ color: results.backendData.confidence >= 90 ? 'var(--success-color)' : (results.backendData.confidence >= 70 ? 'var(--accent-cyan)' : 'var(--error-color)'), margin: '0.25rem 0 0', fontSize: '0.75rem', textTransform: 'uppercase', letterSpacing: '0.05em', fontWeight: 600 }}>
+                          AI Confidence Level: {results.backendData.confidence >= 90 ? 'High' : (results.backendData.confidence >= 70 ? 'Medium' : 'Low')}
+                        </p>
+                      </div>
                       <h3 style={{ color: 'var(--text-primary)', margin: 0, fontSize: '1.25rem' }}>
                         {results.backendData.confidence}%
                       </h3>
@@ -370,6 +379,13 @@ function App() {
                       }}></div>
                     </div>
                   </div>
+
+                  {results.latency && (
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.05)', borderRadius: '8px', padding: '0.75rem 1rem', marginBottom: '1.25rem' }}>
+                      <p style={{ color: 'var(--text-secondary)', margin: 0, fontSize: '0.85rem', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Edge Latency</p>
+                      <p style={{ color: 'var(--text-primary)', margin: 0, fontSize: '0.95rem', fontWeight: 600 }}>{results.latency} ms</p>
+                    </div>
+                  )}
 
                   {results.backendData.explanation && (
                     <>
