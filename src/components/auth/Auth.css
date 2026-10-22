@@ -489,3 +489,82 @@
     margin-top: 0.5rem;
   }
 }
+
+/* User ID Display Card on Registration Success */
+.user-id-display-card {
+  background: rgba(16, 185, 129, 0.08);
+  border: 1px solid rgba(16, 185, 129, 0.35);
+  border-radius: 12px;
+  padding: 1.25rem;
+  margin: 1.25rem 0;
+  text-align: center;
+  box-shadow: 0 0 25px rgba(16, 185, 129, 0.15);
+}
+
+.user-id-label {
+  display: block;
+  font-size: 0.72rem;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  color: #34d399;
+  margin-bottom: 0.5rem;
+  text-transform: uppercase;
+}
+
+.user-id-row {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.75rem;
+  margin: 0.5rem 0;
+}
+
+.user-id-code {
+  font-family: 'Courier New', Courier, monospace;
+  font-size: 1.5rem;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  color: #ffffff;
+  background: rgba(0, 0, 0, 0.4);
+  padding: 0.4rem 1rem;
+  border-radius: 8px;
+  border: 1px dashed rgba(52, 211, 153, 0.5);
+}
+
+.user-id-copy-btn {
+  background: rgba(52, 211, 153, 0.2);
+  border: 1px solid rgba(52, 211, 153, 0.4);
+  color: #34d399;
+  font-size: 0.85rem;
+  font-weight: 700;
+  padding: 0.5rem 0.9rem;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.user-id-copy-btn:hover {
+  background: rgba(52, 211, 153, 0.35);
+  transform: translateY(-1px);
+}
+
+.user-id-role-tag {
+  font-size: 0.8rem;
+  color: #94a3b8;
+  margin-top: 0.6rem;
+}
+
+.uppercase-input {
+  text-transform: uppercase;
+  font-family: monospace;
+  letter-spacing: 0.05em;
+  font-weight: 600;
+}
+
+.form-subhint {
+  font-size: 0.73rem;
+  color: #94a3b8;
+  margin-top: 0.35rem;
+  line-height: 1.3;
+}
+

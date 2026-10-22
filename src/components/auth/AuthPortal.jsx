@@ -6,14 +6,18 @@ import './Auth.css';
 
 export default function AuthPortal({ onLoginSuccess }) {
   const [activeView, setActiveView] = useState('login'); // 'login' | 'register' | 'forgot-password'
-  const [prefilledEmail, setPrefilledEmail] = useState('');
+  const [prefilledUserId, setPrefilledUserId] = useState('');
 
-  const handleRegisterSuccess = (email) => {
-    setPrefilledEmail(email);
-    setActiveView('login');
+  const handleRegisterSuccess = (userId) => {
+    if (userId) {
+      setPrefilledUserId(userId);
+    }
   };
 
-  const handleResetSuccess = () => {
+  const handleSwitchToLogin = (userId = '') => {
+    if (userId) {
+      setPrefilledUserId(userId);
+    }
     setActiveView('login');
   };
 
@@ -22,22 +26,28 @@ export default function AuthPortal({ onLoginSuccess }) {
       <div className="auth-container">
         {activeView === 'login' && (
           <LoginView
-            initialEmail={prefilledEmail}
+            initialUserId={prefilledUserId}
+            onSuccess={onLoginSuccess}
             onLoginSuccess={onLoginSuccess}
+            onSwitchToRegister={() => setActiveView('register')}
+            onSwitchToForgotPassword={() => setActiveView('forgot-password')}
             onNavigate={(view) => setActiveView(view)}
           />
         )}
 
         {activeView === 'register' && (
           <RegisterView
+            onRegisteredSuccess={handleRegisterSuccess}
             onRegisterSuccess={handleRegisterSuccess}
+            onSwitchToLogin={handleSwitchToLogin}
             onNavigate={(view) => setActiveView(view)}
           />
         )}
 
         {activeView === 'forgot-password' && (
           <ForgotPasswordView
-            onResetSuccess={handleResetSuccess}
+            onSwitchToLogin={handleSwitchToLogin}
+            onResetSuccess={() => setActiveView('login')}
             onNavigate={(view) => setActiveView(view)}
           />
         )}

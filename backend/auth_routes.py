@@ -9,38 +9,30 @@ from pydantic import BaseModel, Field
 try:
     from backend.database import get_db, init_db
     from backend.auth_utils import (
-        is_valid_email,
+        generate_user_id,
         validate_password_strength,
-        hash_password,
-        verify_password,
+        validate_recovery_pin,
+        hash_credential,
+        verify_credential,
         generate_session_token,
-        generate_otp,
-        hash_otp,
-        verify_otp,
     )
-    from backend.email_service import send_password_reset_otp_email, get_smtp_config
 except ImportError:
     from database import get_db, init_db
     from auth_utils import (
-        is_valid_email,
+        generate_user_id,
         validate_password_strength,
-        hash_password,
-        verify_password,
+        validate_recovery_pin,
+        hash_credential,
+        verify_credential,
         generate_session_token,
-        generate_otp,
-        hash_otp,
-        verify_otp,
     )
-    from email_service import send_password_reset_otp_email, get_smtp_config
-
 
 logger = logging.getLogger("neuroscan.auth.routes")
 auth_router = APIRouter(prefix="/api/auth", tags=["Authentication"])
 
-# Initialize schema at import
+# Initialize schema
 init_db()
 
-# Pydantic Schemas
 ROLE_LABELS = {
     "hospital": "Hospital",
     "clinic": "Clinic / Diagnostic Centre",
@@ -50,29 +42,22 @@ ROLE_LABELS = {
 
 class RegisterRequest(BaseModel):
     role: str = Field(..., description="Role: 'hospital', 'clinic', 'student', or 'researcher'")
-    email: str = Field(..., description="Account email address")
-    password: str = Field(..., description="Password (min 8 chars, 1 letter, 1 number)")
-    confirm_password: str = Field(..., description="Password confirmation")
     full_name: str = Field(..., description="Full name or authorized contact name")
     organization: str = Field(..., description="Institution, hospital, clinic, or university name")
+    password: str = Field(..., description="Password (min 8 chars, 1 letter, 1 number)")
+    confirm_password: str = Field(..., description="Password confirmation")
+    recovery_pin: str = Field(..., description="4-16 char Recovery PIN chosen by user")
+    confirm_recovery_pin: str = Field(..., description="Recovery PIN confirmation")
 
 class LoginRequest(BaseModel):
-    email: str = Field(..., description="Registered email address")
+    user_id: str = Field(..., description="Permanent NeuroScan User ID (e.g. NS-STU-123456)")
     password: str = Field(..., description="Account password")
 
-class RequestOtpRequest(BaseModel):
-    email: str = Field(..., description="Registered email address for password reset")
-
-class VerifyOtpRequest(BaseModel):
-    email: str = Field(..., description="Account email address")
-    otp: str = Field(..., description="6-digit verification code")
-
 class ResetPasswordRequest(BaseModel):
-    email: str = Field(..., description="Account email address")
-    reset_token: str = Field(..., description="One-time password reset authorization token")
+    user_id: str = Field(..., description="Permanent NeuroScan User ID")
+    recovery_pin: str = Field(..., description="Recovery PIN chosen during registration")
     new_password: str = Field(..., description="New password")
     confirm_password: str = Field(..., description="Confirmation of new password")
-
 
 def get_current_user(authorization: Optional[str] = Header(default=None)):
     """FastAPI dependency to extract and validate the authenticated session."""
@@ -91,11 +76,10 @@ def get_current_user(authorization: Optional[str] = Header(default=None)):
 
     with get_db() as conn:
         cursor = conn.cursor()
-        now_iso = datetime.now(timezone.utc).isoformat()
         cursor.execute("""
-            SELECT s.token, s.expires_at, u.id, u.email, u.role, u.full_name, u.organization, u.created_at
+            SELECT s.token, s.expires_at, u.user_id, u.role, u.full_name, u.organization, u.created_at
             FROM sessions s
-            JOIN users u ON s.user_id = u.id
+            JOIN users u ON s.user_id = u.user_id
             WHERE s.token = ?
         """, (token,))
         row = cursor.fetchone()
@@ -124,8 +108,7 @@ def get_current_user(authorization: Optional[str] = Header(default=None)):
             pass
 
         return {
-            "id": row["id"],
-            "email": row["email"],
+            "user_id": row["user_id"],
             "role": row["role"],
             "full_name": row["full_name"],
             "organization": row["organization"],
@@ -134,13 +117,9 @@ def get_current_user(authorization: Optional[str] = Header(default=None)):
         }
 
 
-# ==========================================
-# Authentication Endpoints
-# ==========================================
-
 @auth_router.post("/register", status_code=status.HTTP_201_CREATED)
 def register(req: RegisterRequest):
-    """Registers a new user (Hospital, Clinic, Student, or Researcher) with scrypt password hashing."""
+    """Registers a new user and generates a permanent User ID with recovery PIN."""
     role = req.role.strip().lower()
     if role not in ROLE_LABELS:
         raise HTTPException(
@@ -148,25 +127,18 @@ def register(req: RegisterRequest):
             detail="Role must be one of: 'hospital', 'clinic', 'student', or 'researcher'."
         )
 
-    email = req.email.strip().lower()
-    if not is_valid_email(email):
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Please provide a valid email address."
-        )
-
     full_name = req.full_name.strip()
     if not full_name:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Full name / Authorized user name is required."
+            detail="Full name is required."
         )
 
     organization = req.organization.strip()
     if not organization:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Institution / Hospital name is required."
+            detail="Institution / Hospital / College name is required."
         )
 
     if req.password != req.confirm_password:
@@ -182,89 +154,101 @@ def register(req: RegisterRequest):
             detail=strength_err
         )
 
+    if req.recovery_pin != req.confirm_recovery_pin:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Recovery PINs do not match."
+        )
+
+    is_pin_valid, pin_err = validate_recovery_pin(req.recovery_pin)
+    if not is_pin_valid:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=pin_err
+        )
+
+    # Hash password and recovery PIN
+    pwd_hash, pwd_salt = hash_credential(req.password)
+    pin_hash, pin_salt = hash_credential(req.recovery_pin.strip())
+
     with get_db() as conn:
         cursor = conn.cursor()
-        # Check for existing email (case-insensitive)
-        cursor.execute("SELECT id FROM users WHERE email = ?", (email,))
-        existing = cursor.fetchone()
-        if existing:
-            raise HTTPException(
-                status_code=status.HTTP_409_CONFLICT,
-                detail="An account with this email address already exists. Please log in or use forgot password."
-            )
+        
+        # Generate unique user_id
+        for _ in range(10):
+            candidate_id = generate_user_id(role)
+            cursor.execute("SELECT 1 FROM users WHERE user_id = ?", (candidate_id,))
+            if not cursor.fetchone():
+                user_id = candidate_id
+                break
+        else:
+            user_id = f"{generate_user_id(role)}-{secrets.token_hex(2)}"
 
-        pwd_hash, salt = hash_password(req.password)
         cursor.execute("""
-            INSERT INTO users (email, role, full_name, organization, password_hash, salt)
-            VALUES (?, ?, ?, ?, ?, ?)
-        """, (email, role, full_name, organization, pwd_hash, salt))
-        user_id = cursor.lastrowid
+            INSERT INTO users (
+                user_id, role, full_name, organization, 
+                password_hash, salt, recovery_pin_hash, recovery_pin_salt
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        """, (
+            user_id, role, full_name, organization,
+            pwd_hash, pwd_salt, pin_hash, pin_salt
+        ))
 
-    logger.info("New %s account registered: user_id=%s, email=%s", role, user_id, email)
+    logger.info("New %s account registered: user_id=%s", role, user_id)
     role_label = ROLE_LABELS.get(role, role.capitalize())
     return {
         "status": "success",
-        "message": f"{role_label} account created successfully. You can now log in.",
-        "user": {
-            "email": email,
-            "role": role,
-            "full_name": full_name,
-            "organization": organization
-        }
+        "user_id": user_id,
+        "role": role,
+        "full_name": full_name,
+        "organization": organization,
+        "message": f"{role_label} account created successfully! Save your User ID: {user_id}"
     }
 
 
 @auth_router.post("/login")
 def login(req: LoginRequest, request: Request):
-    """Authenticates user and returns a secure session token."""
-    email = req.email.strip().lower()
-    if not email or not req.password:
+    """Authenticates using User ID and password, returns session token."""
+    user_id = req.user_id.strip().upper()
+    if not user_id or not req.password:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Email and password are required."
+            detail="User ID and password are required."
         )
 
     with get_db() as conn:
         cursor = conn.cursor()
         cursor.execute("""
-            SELECT id, email, role, full_name, organization, password_hash, salt
+            SELECT user_id, role, full_name, organization, password_hash, salt
             FROM users
-            WHERE email = ?
-        """, (email,))
+            WHERE user_id = ?
+        """, (user_id,))
         user = cursor.fetchone()
 
-        if not user:
-            # Generic response to prevent email harvesting
+        if not user or not verify_credential(req.password, user["password_hash"], user["salt"]):
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Invalid email or password."
+                detail="Invalid User ID or password."
             )
 
-        is_correct = verify_password(req.password, user["password_hash"], user["salt"])
-        if not is_correct:
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Invalid email or password."
-            )
-
-        # Generate 7-day session token
-        session_token = generate_session_token()
+        # Create session
+        token = generate_session_token()
         expires_at = datetime.now(timezone.utc) + timedelta(days=7)
-        user_agent = request.headers.get("user-agent", "unknown")[:255]
+        user_agent = request.headers.get("user-agent", "")[:250]
 
         cursor.execute("""
             INSERT INTO sessions (token, user_id, expires_at, user_agent)
             VALUES (?, ?, ?, ?)
-        """, (session_token, user["id"], expires_at.isoformat(), user_agent))
+        """, (token, user["user_id"], expires_at.isoformat(), user_agent))
 
-    logger.info("User logged in successfully: user_id=%s, email=%s", user["id"], email)
+    logger.info("User logged in successfully: user_id=%s", user["user_id"])
     return {
         "status": "success",
         "message": "Login successful.",
-        "token": session_token,
+        "token": token,
         "user": {
-            "id": user["id"],
-            "email": user["email"],
+            "user_id": user["user_id"],
             "role": user["role"],
             "full_name": user["full_name"],
             "organization": user["organization"]
@@ -274,12 +258,11 @@ def login(req: LoginRequest, request: Request):
 
 @auth_router.get("/me")
 def get_profile(current_user: dict = Depends(get_current_user)):
-    """Returns profile for currently authenticated session."""
+    """Returns currently authenticated user profile."""
     return {
         "status": "success",
         "user": {
-            "id": current_user["id"],
-            "email": current_user["email"],
+            "user_id": current_user["user_id"],
             "role": current_user["role"],
             "full_name": current_user["full_name"],
             "organization": current_user["organization"]
@@ -289,199 +272,28 @@ def get_profile(current_user: dict = Depends(get_current_user)):
 
 @auth_router.post("/logout")
 def logout(current_user: dict = Depends(get_current_user)):
-    """Terminates the user's active session."""
-    token = current_user.get("session_token")
-    if token:
-        with get_db() as conn:
-            cursor = conn.cursor()
-            cursor.execute("DELETE FROM sessions WHERE token = ?", (token,))
-    return {"status": "success", "message": "Successfully logged out."}
-
-
-# ==========================================
-# Forgot Password & OTP Flow
-# ==========================================
-
-@auth_router.post("/forgot-password/request-otp")
-def request_password_reset_otp(req: RequestOtpRequest):
-    """
-    Generates and dispatches a 6-digit OTP code for password reset.
-    Returns safe generic message to avoid email enumeration.
-    """
-    email = req.email.strip().lower()
-    if not is_valid_email(email):
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Please provide a valid email address."
-        )
-
+    """Logs out by invalidating active session."""
     with get_db() as conn:
-        cursor = conn.cursor()
-        
-        # Cooldown check: prevent requesting more than once every 60 seconds
-        cursor.execute("""
-            SELECT created_at FROM password_resets
-            WHERE email = ? AND used = 0
-            ORDER BY id DESC LIMIT 1
-        """, (email,))
-        recent = cursor.fetchone()
-        if recent:
-            try:
-                created_time = datetime.fromisoformat(recent["created_at"])
-                if created_time.tzinfo is None:
-                    created_time = created_time.replace(tzinfo=timezone.utc)
-                if (datetime.now(timezone.utc) - created_time).total_seconds() < 60:
-                    raise HTTPException(
-                        status_code=status.HTTP_429_TOO_MANY_REQUESTS,
-                        detail="A verification code was recently sent. Please wait 60 seconds before requesting another."
-                    )
-            except HTTPException:
-                raise
-            except Exception:
-                pass
-
-        # Check if user exists
-        cursor.execute("SELECT id FROM users WHERE email = ?", (email,))
-        user = cursor.fetchone()
-
-        email_status_detail = "If this email is registered, a 6-digit verification code has been dispatched."
-        dev_hint = None
-        email_sent = False
-
-        if user:
-            otp_code = generate_otp()
-            salt = secrets.token_hex(8)
-            hashed_otp = hash_otp(otp_code, salt)
-            expires_at = datetime.now(timezone.utc) + timedelta(minutes=10)
-
-            cursor.execute("""
-                INSERT INTO password_resets (email, otp_hash, salt, attempts_left, used, expires_at)
-                VALUES (?, ?, ?, 5, 0, ?)
-            """, (email, hashed_otp, salt, expires_at.isoformat()))
-
-            # Send Email
-            success, is_smtp, status_msg, dev_otp = send_password_reset_otp_email(email, otp_code)
-            email_sent = success
-            if not is_smtp and dev_otp:
-                dev_hint = {
-                    "notice": "SMTP not configured in environment. Displaying dev preview code for local evaluation.",
-                    "dev_otp": dev_otp
-                }
-
-    smtp_info = get_smtp_config()
-    return {
-        "status": "success",
-        "message": email_status_detail,
-        "email_service_configured": smtp_info["is_configured"],
-        "dev_hint": dev_hint
-    }
+        conn.cursor().execute("DELETE FROM sessions WHERE token = ?", (current_user["session_token"],))
+    return {"status": "success", "message": "Logged out successfully."}
 
 
-@auth_router.post("/forgot-password/verify-otp")
-def verify_password_reset_otp(req: VerifyOtpRequest):
-    """
-    Verifies the 6-digit OTP code.
-    If valid, marks OTP as verified and returns a short-lived reset authorization token.
-    """
-    email = req.email.strip().lower()
-    otp = req.otp.strip()
-
-    if not is_valid_email(email) or len(otp) != 6 or not otp.isdigit():
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Invalid email or 6-digit verification code format."
-        )
-
-    with get_db() as conn:
-        cursor = conn.cursor()
-        cursor.execute("""
-            SELECT id, otp_hash, salt, attempts_left, used, expires_at
-            FROM password_resets
-            WHERE email = ? AND used = 0
-            ORDER BY id DESC LIMIT 1
-        """, (email,))
-        reset_record = cursor.fetchone()
-
-        if not reset_record:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="No pending verification code found. Please request a new code."
-            )
-
-        # Check attempts left
-        if reset_record["attempts_left"] <= 0:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Maximum verification attempts exceeded. Please request a new code."
-            )
-
-        # Check expiration
-        try:
-            expires_at = datetime.fromisoformat(reset_record["expires_at"])
-            if expires_at.tzinfo is None:
-                expires_at = expires_at.replace(tzinfo=timezone.utc)
-            if datetime.now(timezone.utc) > expires_at:
-                cursor.execute("UPDATE password_resets SET used = 1 WHERE id = ?", (reset_record["id"],))
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail="Verification code has expired (10-minute limit). Please request a new code."
-                )
-        except HTTPException:
-            raise
-        except Exception:
-            pass
-
-        # Verify OTP
-        is_match = verify_otp(otp, reset_record["otp_hash"], reset_record["salt"])
-        if not is_match:
-            new_attempts = reset_record["attempts_left"] - 1
-            cursor.execute("UPDATE password_resets SET attempts_left = ? WHERE id = ?", (new_attempts, reset_record["id"]))
-            if new_attempts <= 0:
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail="Invalid verification code. Maximum attempts reached. Please request a new code."
-                )
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"Incorrect verification code. {new_attempts} attempt(s) remaining."
-            )
-
-        # Mark OTP record as used and issue single-use reset authorization token (valid 15 mins)
-        reset_token = secrets.token_urlsafe(32)
-        token_expiry = datetime.now(timezone.utc) + timedelta(minutes=15)
-        cursor.execute("""
-            UPDATE password_resets
-            SET used = 1, reset_token = ?, reset_token_expires_at = ?
-            WHERE id = ?
-        """, (reset_token, token_expiry.isoformat(), reset_record["id"]))
-
-    logger.info("OTP verified successfully for email %s. Reset token issued.", email)
-    return {
-        "status": "success",
-        "message": "Verification code verified successfully. You may now set your new password.",
-        "reset_token": reset_token
-    }
-
-
-@auth_router.post("/forgot-password/reset-password")
+@auth_router.post("/reset-password")
 def reset_password(req: ResetPasswordRequest):
-    """
-    Changes user's password using the verified reset_token.
-    Invalidates all prior active sessions for this user for security.
-    """
-    email = req.email.strip().lower()
-    reset_token = req.reset_token.strip()
+    """Resets password using User ID and Recovery PIN with rate-limiting."""
+    user_id = req.user_id.strip().upper()
+    pin = req.recovery_pin.strip()
 
-    if not email or not reset_token:
+    if not user_id or not pin:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Email and reset authorization token are required."
+            detail="User ID and Recovery PIN are required."
         )
 
     if req.new_password != req.confirm_password:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="New password and confirmation do not match."
+            detail="New passwords do not match."
         )
 
     is_strong, strength_err = validate_password_strength(req.new_password)
@@ -494,57 +306,62 @@ def reset_password(req: ResetPasswordRequest):
     with get_db() as conn:
         cursor = conn.cursor()
         cursor.execute("""
-            SELECT id, reset_token_expires_at, used
-            FROM password_resets
-            WHERE email = ? AND reset_token = ?
-            ORDER BY id DESC LIMIT 1
-        """, (email, reset_token))
-        record = cursor.fetchone()
+            SELECT user_id, recovery_pin_hash, recovery_pin_salt, failed_reset_attempts, last_failed_attempt
+            FROM users
+            WHERE user_id = ?
+        """, (user_id,))
+        user = cursor.fetchone()
 
-        if not record:
+        if not user:
+            # Generic error to prevent enumeration
             raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Invalid or unrecognized password reset token. Please restart the reset process."
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Invalid User ID or Recovery PIN."
             )
 
-        # Check reset token expiry
-        expires_str = record["reset_token_expires_at"]
-        if expires_str:
+        # Rate limiting: max 5 failed attempts within 15 minutes
+        failed_count = user["failed_reset_attempts"] or 0
+        last_failed = user["last_failed_attempt"]
+        if failed_count >= 5 and last_failed:
             try:
-                expires_at = datetime.fromisoformat(expires_str)
-                if expires_at.tzinfo is None:
-                    expires_at = expires_at.replace(tzinfo=timezone.utc)
-                if datetime.now(timezone.utc) > expires_at:
+                last_dt = datetime.fromisoformat(last_failed)
+                if last_dt.tzinfo is None:
+                    last_dt = last_dt.replace(tzinfo=timezone.utc)
+                if (datetime.now(timezone.utc) - last_dt).total_seconds() < 900:
                     raise HTTPException(
-                        status_code=status.HTTP_400_BAD_REQUEST,
-                        detail="Password reset session expired. Please request a new verification code."
+                        status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                        detail="Too many failed recovery attempts. Please wait 15 minutes before trying again."
                     )
             except HTTPException:
                 raise
             except Exception:
                 pass
 
-        # Hash new password
-        new_hash, new_salt = hash_password(req.new_password)
-        now_iso = datetime.now(timezone.utc).isoformat()
+        if not verify_credential(pin, user["recovery_pin_hash"], user["recovery_pin_salt"]):
+            now_iso = datetime.now(timezone.utc).isoformat()
+            cursor.execute("""
+                UPDATE users
+                SET failed_reset_attempts = failed_reset_attempts + 1, last_failed_attempt = ?
+                WHERE user_id = ?
+            """, (now_iso, user_id))
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Invalid User ID or Recovery PIN."
+            )
 
+        # PIN verified! Update password and clear sessions
+        pwd_hash, pwd_salt = hash_credential(req.new_password)
+        now_iso = datetime.now(timezone.utc).isoformat()
         cursor.execute("""
             UPDATE users
-            SET password_hash = ?, salt = ?, updated_at = ?
-            WHERE email = ?
-        """, (new_hash, new_salt, now_iso, email))
+            SET password_hash = ?, salt = ?, failed_reset_attempts = 0, last_failed_attempt = NULL, updated_at = ?
+            WHERE user_id = ?
+        """, (pwd_hash, pwd_salt, now_iso, user_id))
 
-        # Invalidate reset token
-        cursor.execute("UPDATE password_resets SET reset_token = NULL WHERE id = ?", (record["id"],))
+        cursor.execute("DELETE FROM sessions WHERE user_id = ?", (user_id,))
 
-        # Invalidate all active user sessions for security
-        cursor.execute("""
-            DELETE FROM sessions
-            WHERE user_id IN (SELECT id FROM users WHERE email = ?)
-        """, (email,))
-
-    logger.info("Password successfully reset for %s. Active sessions cleared.", email)
+    logger.info("Password successfully reset via recovery PIN for user_id=%s", user_id)
     return {
         "status": "success",
-        "message": "Your password has been successfully updated. Please sign in with your new password."
+        "message": "Password reset successfully. You can now sign in with your User ID and new password."
     }

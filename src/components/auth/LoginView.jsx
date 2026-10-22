@@ -1,102 +1,110 @@
-import { useState } from 'react';
-import { Mail, Lock, Eye, EyeOff, BrainCircuit, ArrowRight, AlertCircle, CheckCircle2, ShieldCheck, Loader2 } from 'lucide-react';
+import React, { useState } from 'react';
 import { authService } from '../../services/authService';
 
-export default function LoginView({ initialEmail = '', onLoginSuccess, onNavigate }) {
-  const [email, setEmail] = useState(initialEmail);
+export default function LoginView({
+  initialUserId = '',
+  onSuccess,
+  onSwitchToRegister,
+  onSwitchToForgotPassword
+}) {
+  const [userId, setUserId] = useState(initialUserId || '');
+  const [prevInitialId, setPrevInitialId] = useState(initialUserId);
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
-  const [isLoading, setIsLoading] = useState(false);
-  const [errorMsg, setErrorMsg] = useState('');
-  const [successMsg, setSuccessMsg] = useState('');
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
+
+  if (initialUserId !== prevInitialId) {
+    setPrevInitialId(initialUserId);
+    setUserId(initialUserId);
+  }
+
 
   const handleSubmit = async (e) => {
     e.preventDefault();
-    setErrorMsg('');
-    setSuccessMsg('');
+    setError('');
 
-    if (!email.trim() || !password) {
-      setErrorMsg('Please enter both your email address and password.');
+    const trimmedId = userId.trim().toUpperCase();
+    if (!trimmedId) {
+      setError('Please enter your NeuroScan User ID.');
+      return;
+    }
+    if (!password) {
+      setError('Please enter your password.');
       return;
     }
 
-    setIsLoading(true);
+    setLoading(true);
     try {
-      const data = await authService.login({ email: email.trim(), password });
-      setSuccessMsg('Authentication successful! Initializing neuroimaging workspace...');
-      setTimeout(() => {
-        onLoginSuccess(data.user, data.token);
-      }, 700);
+      const data = await authService.login({
+        userId: trimmedId,
+        password
+      });
+      if (onSuccess) {
+        onSuccess(data.user);
+      }
     } catch (err) {
-      setErrorMsg(err.message || 'Invalid email or password. Please try again.');
+      setError(err.message || 'Invalid User ID or password.');
     } finally {
-      setIsLoading(false);
+      setLoading(false);
     }
   };
 
   return (
     <div className="auth-card">
       <div className="auth-header">
-        <div className="auth-logo-badge">
-          <BrainCircuit size={32} />
-        </div>
+        <div className="auth-icon-badge">🧠</div>
         <h2 className="auth-title">
-          <span className="title-gradient">NeuroScan AI</span> Portal
+          NeuroScan AI <span className="text-highlight">Portal</span>
         </h2>
         <p className="auth-subtitle">
-          Intelligent multimodal brain scan analysis & deep clinical neural network authentication
+          Enter your User ID and password to access the clinical portal
         </p>
       </div>
 
-      {errorMsg && (
-        <div className="auth-alert auth-alert-error">
-          <AlertCircle size={18} style={{ flexShrink: 0, marginTop: '2px' }} />
-          <div>{errorMsg}</div>
+      {error && (
+        <div className="auth-alert auth-alert-error" role="alert">
+          {error}
         </div>
       )}
 
-      {successMsg && (
-        <div className="auth-alert auth-alert-success">
-          <CheckCircle2 size={18} style={{ flexShrink: 0, marginTop: '2px' }} />
-          <div>{successMsg}</div>
-        </div>
-      )}
-
-      <form onSubmit={handleSubmit}>
+      <form className="auth-form" onSubmit={handleSubmit}>
         <div className="form-group">
-          <label className="form-label" htmlFor="login-email">
-            <span>Email Address</span>
+          <label className="form-label" htmlFor="login-user-id">
+            NeuroScan User ID
           </label>
           <div className="input-wrapper">
-            <Mail size={18} className="input-icon-left" />
+            <span className="input-icon">🪪</span>
             <input
-              id="login-email"
-              type="email"
-              className="auth-input"
-              placeholder="e.g. physician@hospital.org or student@univ.edu"
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              disabled={isLoading}
+              id="login-user-id"
+              type="text"
+              className="auth-input uppercase-input"
+              placeholder="e.g. NS-STU-482910 or NS-HOSP-..."
+              value={userId}
+              onChange={(e) => setUserId(e.target.value.toUpperCase())}
+              autoComplete="username"
+              disabled={loading}
               required
-              autoComplete="email"
             />
           </div>
         </div>
 
         <div className="form-group">
-          <div className="form-label">
-            <label htmlFor="login-password">Password</label>
+          <div className="form-label-row">
+            <label className="form-label" htmlFor="login-password">
+              Password
+            </label>
             <button
               type="button"
-              className="auth-link"
-              style={{ fontSize: '0.8rem' }}
-              onClick={() => onNavigate('forgot-password')}
+              className="auth-link-btn form-link"
+              onClick={onSwitchToForgotPassword}
+              disabled={loading}
             >
               Forgot password?
             </button>
           </div>
           <div className="input-wrapper">
-            <Lock size={18} className="input-icon-left" />
+            <span className="input-icon">🔒</span>
             <input
               id="login-password"
               type={showPassword ? 'text' : 'password'}
@@ -104,57 +112,44 @@ export default function LoginView({ initialEmail = '', onLoginSuccess, onNavigat
               placeholder="Enter your account password"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
-              disabled={isLoading}
-              required
               autoComplete="current-password"
+              disabled={loading}
+              required
             />
             <button
               type="button"
-              className="input-action-btn"
+              className="input-eye-btn"
               onClick={() => setShowPassword(!showPassword)}
               aria-label={showPassword ? 'Hide password' : 'Show password'}
             >
-              {showPassword ? <EyeOff size={18} /> : <Eye size={18} />}
+              {showPassword ? '👁️' : '👁️‍🗨️'}
             </button>
           </div>
         </div>
 
         <button
           type="submit"
-          className="auth-submit-btn"
-          disabled={isLoading}
+          className="auth-btn auth-btn-primary"
+          disabled={loading}
         >
-          {isLoading ? (
-            <>
-              <Loader2 size={18} className="animate-spin" />
-              <span>Authenticating...</span>
-            </>
-          ) : (
-            <>
-              <span>Sign In to NeuroScan AI</span>
-              <ArrowRight size={18} />
-            </>
-          )}
+          {loading ? 'Authenticating...' : 'Sign In to NeuroScan AI →'}
         </button>
       </form>
 
       <div className="auth-footer">
-        <div>
-          New to NeuroScan AI?{' '}
-          <button
-            type="button"
-            className="auth-link"
-            onClick={() => onNavigate('register')}
-          >
-            Create an account
-          </button>
-        </div>
-        <div style={{ textAlign: 'center' }}>
-          <span className="auth-disclaimer-badge">
-            <ShieldCheck size={14} style={{ color: 'var(--accent-cyan)' }} />
-            Encrypted Session • Research & Educational Imaging
-          </span>
-        </div>
+        <span>New to NeuroScan AI?</span>
+        <button
+          type="button"
+          className="auth-link-btn"
+          onClick={onSwitchToRegister}
+          disabled={loading}
+        >
+          Create an account
+        </button>
+      </div>
+
+      <div className="auth-security-notice">
+        <span>🔒 Secure Clinical Session • Dual-Encrypted Vault</span>
       </div>
     </div>
   );

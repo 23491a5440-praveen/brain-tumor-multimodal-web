@@ -1,4 +1,4 @@
-// Authentication API Client Service for NeuroScan AI
+// Authentication API Client Service for NeuroScan AI (User ID + Password + Recovery PIN)
 
 export function getApiBaseUrl() {
   const rawApiUrl =
@@ -27,10 +27,10 @@ async function parseApiResponse(response, defaultMsg) {
 
   if (!response.ok) {
     if (response.status === 404) {
-      throw new Error('Authentication service endpoint not found (HTTP 404). The backend server may still be deploying.');
+      throw new Error('Authentication endpoint not found (HTTP 404). Please ensure the backend is active.');
     }
     if (response.status === 502 || response.status === 503) {
-      throw new Error(`The backend server is temporarily unavailable or restarting (HTTP ${response.status}). Please try again shortly.`);
+      throw new Error(`The backend server is temporarily waking up (HTTP ${response.status}). Please try again shortly.`);
     }
     const message = data && data.detail ? data.detail : defaultMsg;
     throw new Error(message);
@@ -77,31 +77,35 @@ export const authService = {
   },
 
   // API Calls
-  async register({ role, email, password, confirmPassword, fullName, organization }) {
+  async register({ role, fullName, organization, password, confirmPassword, recoveryPin, confirmRecoveryPin }) {
     const baseUrl = getApiBaseUrl();
     const response = await fetch(`${baseUrl}/api/auth/register`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         role,
-        email,
+        full_name: fullName,
+        organization,
         password,
         confirm_password: confirmPassword,
-        full_name: fullName,
-        organization
+        recovery_pin: recoveryPin,
+        confirm_recovery_pin: confirmRecoveryPin
       })
     });
     return await parseApiResponse(response, 'Registration failed. Please check your information.');
   },
 
-  async login({ email, password }) {
+  async login({ userId, password }) {
     const baseUrl = getApiBaseUrl();
     const response = await fetch(`${baseUrl}/api/auth/login`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ email, password })
+      body: JSON.stringify({
+        user_id: userId,
+        password
+      })
     });
-    const data = await parseApiResponse(response, 'Invalid email or password.');
+    const data = await parseApiResponse(response, 'Invalid User ID or password.');
     if (data && data.token && data.user) {
       this.saveSession(data.token, data.user);
     }
@@ -159,39 +163,18 @@ export const authService = {
     this.clearSession();
   },
 
-  async requestPasswordResetOtp(email) {
+  async resetPassword({ userId, recoveryPin, newPassword, confirmPassword }) {
     const baseUrl = getApiBaseUrl();
-    const response = await fetch(`${baseUrl}/api/auth/forgot-password/request-otp`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ email })
-    });
-    return await parseApiResponse(response, 'Unable to request verification code. Please try again.');
-  },
-
-  async verifyPasswordResetOtp(email, otp) {
-    const baseUrl = getApiBaseUrl();
-    const response = await fetch(`${baseUrl}/api/auth/forgot-password/verify-otp`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ email, otp })
-    });
-    return await parseApiResponse(response, 'Invalid verification code.');
-  },
-
-  async resetPassword({ email, resetToken, newPassword, confirmPassword }) {
-    const baseUrl = getApiBaseUrl();
-    const response = await fetch(`${baseUrl}/api/auth/forgot-password/reset-password`, {
+    const response = await fetch(`${baseUrl}/api/auth/reset-password`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        email,
-        reset_token: resetToken,
+        user_id: userId,
+        recovery_pin: recoveryPin,
         new_password: newPassword,
         confirm_password: confirmPassword
       })
     });
-    return await parseApiResponse(response, 'Failed to update password.');
+    return await parseApiResponse(response, 'Failed to reset password. Please check your User ID and Recovery PIN.');
   }
 };
-

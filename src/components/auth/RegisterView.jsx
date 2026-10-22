@@ -1,192 +1,211 @@
-import { useState } from 'react';
-import { Mail, Lock, Eye, EyeOff, User, Building2, Activity, GraduationCap, Microscope, ArrowRight, AlertCircle, CheckCircle2, Loader2, ArrowLeft } from 'lucide-react';
+import React, { useState } from 'react';
 import { authService } from '../../services/authService';
 
-const ROLE_CONFIGS = {
-  hospital: {
+const ROLE_OPTIONS = [
+  {
     id: 'hospital',
     label: 'Hospital',
-    icon: Building2,
+    icon: '🏥',
     orgLabel: 'Hospital / Health System Name',
-    orgPlaceholder: 'e.g. Mayo Clinic or Johns Hopkins Hospital',
-    nameLabel: "Authorized Physician / User's Name",
-    namePlaceholder: 'e.g. Dr. Jane Reynolds, Chief Radiologist',
-    emailLabel: 'Work Email Address',
-    emailPlaceholder: 'e.g. j.reynolds@hospital.org'
+    orgPlaceholder: 'e.g. Johns Hopkins Hospital / Apollo Health',
+    nameLabel: 'Chief Medical Officer / Authorized Clinician',
+    namePlaceholder: 'e.g. Dr. Eleanor Vance, MD'
   },
-  clinic: {
+  {
     id: 'clinic',
-    label: 'Clinic / Diagnostic Centre',
-    icon: Activity,
-    orgLabel: 'Clinic or Diagnostic Centre Name',
-    orgPlaceholder: 'e.g. Apex Neuro Imaging Diagnostic Centre',
-    nameLabel: 'Radiologist / Authorized Contact Name',
-    namePlaceholder: 'e.g. Dr. Marcus Vance, Diagnostic Radiologist',
-    emailLabel: 'Clinic / Work Email Address',
-    emailPlaceholder: 'e.g. diagnostics@apexneuro.com'
+    label: 'Clinic / Diagnostic',
+    icon: '🔬',
+    orgLabel: 'Clinic / Diagnostic Centre Name',
+    orgPlaceholder: 'e.g. Metro Neuro-Diagnostic Centre',
+    nameLabel: 'Lead Radiologist / Centre Director',
+    namePlaceholder: 'e.g. Dr. Marcus Brody, MD'
   },
-  student: {
+  {
     id: 'student',
     label: 'Student',
-    icon: GraduationCap,
+    icon: '🎓',
     orgLabel: 'College or University Name',
-    orgPlaceholder: 'e.g. Stanford University or MIT',
+    orgPlaceholder: 'e.g. Stanford University School of Medicine',
     nameLabel: "Student's Full Name",
-    namePlaceholder: 'e.g. Alex Mercer',
-    emailLabel: 'Student Email Address',
-    emailPlaceholder: 'e.g. alex.mercer@stanford.edu'
+    namePlaceholder: 'e.g. Alex Rivera'
   },
-  researcher: {
+  {
     id: 'researcher',
     label: 'Researcher',
-    icon: Microscope,
-    orgLabel: 'Research Institution / Laboratory Name',
-    orgPlaceholder: 'e.g. Broad Institute or Neuro AI Lab',
-    nameLabel: 'Researcher / Principal Investigator Name',
-    namePlaceholder: 'e.g. Dr. Aris Thorne, Lead AI Investigator',
-    emailLabel: 'Institutional / Academic Email',
-    emailPlaceholder: 'e.g. a.thorne@broadinstitute.org'
+    icon: '🧬',
+    orgLabel: 'Research Institution / Laboratory',
+    orgPlaceholder: 'e.g. Broad Institute / Neuro-AI Research Lab',
+    nameLabel: 'Principal Investigator / Research Fellow',
+    namePlaceholder: 'e.g. Dr. Sarah Jenkins, PhD'
   }
-};
+];
 
-export default function RegisterView({ onRegisterSuccess, onNavigate }) {
-  const [role, setRole] = useState('hospital'); // 'hospital' | 'clinic' | 'student' | 'researcher'
-  const [fullName, setFullName] = useState('');
+export default function RegisterView({ onSwitchToLogin, onRegisteredSuccess }) {
+  const [selectedRole, setSelectedRole] = useState('student');
   const [organization, setOrganization] = useState('');
-  const [email, setEmail] = useState('');
+  const [fullName, setFullName] = useState('');
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
+  const [recoveryPin, setRecoveryPin] = useState('');
+  const [confirmRecoveryPin, setConfirmRecoveryPin] = useState('');
   const [showPassword, setShowPassword] = useState(false);
-  const [showConfirmPassword, setShowConfirmPassword] = useState(false);
+  const [showPin, setShowPin] = useState(false);
 
-  const [isLoading, setIsLoading] = useState(false);
-  const [errorMsg, setErrorMsg] = useState('');
-  const [successMsg, setSuccessMsg] = useState('');
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
+  const [registeredUser, setRegisteredUser] = useState(null);
+  const [copied, setCopied] = useState(false);
 
-  const currentRoleConfig = ROLE_CONFIGS[role] || ROLE_CONFIGS.hospital;
-
-  const handleRoleChange = (newRole) => {
-    setRole(newRole);
-    setErrorMsg('');
-  };
+  const currentRoleConfig = ROLE_OPTIONS.find((r) => r.id === selectedRole) || ROLE_OPTIONS[2];
 
   const handleSubmit = async (e) => {
     e.preventDefault();
-    setErrorMsg('');
-    setSuccessMsg('');
-
-    // Field Validations
-    if (!fullName.trim()) {
-      setErrorMsg(`Please provide the ${currentRoleConfig.nameLabel.toLowerCase()}.`);
-      return;
-    }
+    setError('');
 
     if (!organization.trim()) {
-      setErrorMsg(`Please provide your ${currentRoleConfig.orgLabel.toLowerCase()}.`);
+      setError(`Please enter your ${currentRoleConfig.orgLabel.toLowerCase()}.`);
       return;
     }
-
-    if (!email.trim() || !email.includes('@')) {
-      setErrorMsg('Please enter a valid email address.');
+    if (!fullName.trim()) {
+      setError(`Please enter your ${currentRoleConfig.nameLabel.toLowerCase()}.`);
       return;
     }
-
     if (password.length < 8) {
-      setErrorMsg('Password must be at least 8 characters long and contain both letters and digits.');
+      setError('Password must be at least 8 characters with 1 letter and 1 number.');
       return;
     }
-
     if (password !== confirmPassword) {
-      setErrorMsg('Passwords do not match. Please re-enter your password.');
+      setError('Passwords do not match.');
+      return;
+    }
+    if (recoveryPin.trim().length < 4) {
+      setError('Recovery PIN must be at least 4 characters/digits.');
+      return;
+    }
+    if (recoveryPin !== confirmRecoveryPin) {
+      setError('Recovery PINs do not match.');
       return;
     }
 
-    setIsLoading(true);
+    setLoading(true);
     try {
-      const data = await authService.register({
-        role,
-        email: email.trim(),
+      const result = await authService.register({
+        role: selectedRole,
+        fullName: fullName.trim(),
+        organization: organization.trim(),
         password,
         confirmPassword,
-        fullName: fullName.trim(),
-        organization: organization.trim()
+        recoveryPin: recoveryPin.trim(),
+        confirmRecoveryPin: confirmRecoveryPin.trim()
       });
 
-      setSuccessMsg(data.message || 'Account created successfully! Redirecting to sign in...');
-      setTimeout(() => {
-        onRegisterSuccess(email.trim());
-      }, 1200);
+      setRegisteredUser(result);
+      if (onRegisteredSuccess) {
+        onRegisteredSuccess(result.user_id);
+      }
     } catch (err) {
-      setErrorMsg(err.message || 'Failed to create account. Please check your information.');
+      setError(err.message || 'Registration failed. Please check your information.');
     } finally {
-      setIsLoading(false);
+      setLoading(false);
     }
   };
+
+  const handleCopyUserId = () => {
+    if (registeredUser?.user_id) {
+      navigator.clipboard.writeText(registeredUser.user_id);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 3000);
+    }
+  };
+
+  // Success view with generated User ID
+  if (registeredUser) {
+    return (
+      <div className="auth-card auth-card-success">
+        <div className="auth-header">
+          <div className="auth-icon-badge auth-icon-success">✓</div>
+          <h2 className="auth-title">Account Created!</h2>
+          <p className="auth-subtitle">
+            Your unique NeuroScan AI User ID has been generated.
+          </p>
+        </div>
+
+        <div className="user-id-display-card">
+          <span className="user-id-label">YOUR PERMANENT USER ID</span>
+          <div className="user-id-row">
+            <span className="user-id-code">{registeredUser.user_id}</span>
+            <button
+              type="button"
+              className="user-id-copy-btn"
+              onClick={handleCopyUserId}
+              title="Copy User ID to clipboard"
+            >
+              {copied ? '✓ Copied' : '📋 Copy'}
+            </button>
+          </div>
+          <p className="user-id-role-tag">
+            Account Role: <strong>{currentRoleConfig.label}</strong> ({registeredUser.organization})
+          </p>
+        </div>
+
+        <div className="auth-alert auth-alert-warning" style={{ marginTop: '1rem', textAlign: 'left' }}>
+          <strong>⚠️ Important:</strong> Save this User ID in a safe place. You will need your <strong>User ID</strong> and <strong>password</strong> to sign in. If you ever forget your password, you will use your <strong>Recovery PIN</strong>.
+        </div>
+
+        <button
+          type="button"
+          className="auth-btn auth-btn-primary"
+          style={{ marginTop: '1.25rem' }}
+          onClick={() => onSwitchToLogin(registeredUser.user_id)}
+        >
+          Sign In Now →
+        </button>
+      </div>
+    );
+  }
 
   return (
     <div className="auth-card">
       <div className="auth-header">
-        <button
-          type="button"
-          className="auth-link"
-          style={{ display: 'inline-flex', alignItems: 'center', gap: '0.4rem', marginBottom: '1rem', fontSize: '0.85rem' }}
-          onClick={() => onNavigate('login')}
-        >
-          <ArrowLeft size={16} />
-          <span>Back to Sign In</span>
-        </button>
-
-        <h2 className="auth-title">
-          Create <span className="title-gradient">NeuroScan AI</span> Account
-        </h2>
+        <div className="auth-icon-badge">🧠</div>
+        <h2 className="auth-title">Create NeuroScan Account</h2>
         <p className="auth-subtitle">
-          Select your institutional or professional role to register for clinical neuroimaging access
+          Select your role to generate your permanent clinical User ID
         </p>
       </div>
 
-      {/* 4-Role Selection Grid */}
-      <div className="role-selector-container">
-        <span className="role-selector-label">Select Your Role</span>
-        <div className="role-tabs role-tabs-four">
-          {Object.values(ROLE_CONFIGS).map((cfg) => {
-            const IconComponent = cfg.icon;
-            const isActive = role === cfg.id;
-            return (
-              <button
-                key={cfg.id}
-                type="button"
-                className={`role-tab-btn ${isActive ? 'active' : ''}`}
-                onClick={() => handleRoleChange(cfg.id)}
-              >
-                <IconComponent size={16} />
-                <span>{cfg.label}</span>
-              </button>
-            );
-          })}
-        </div>
+      {/* Role Selector Tabs */}
+      <div className="role-selector" role="tablist" aria-label="Account Role Selection">
+        {ROLE_OPTIONS.map((role) => (
+          <button
+            key={role.id}
+            type="button"
+            className={`role-tab ${selectedRole === role.id ? 'active' : ''}`}
+            onClick={() => {
+              setSelectedRole(role.id);
+              setError('');
+            }}
+          >
+            <span className="role-icon">{role.icon}</span>
+            <span className="role-name">{role.label}</span>
+          </button>
+        ))}
       </div>
 
-      {errorMsg && (
-        <div className="auth-alert auth-alert-error">
-          <AlertCircle size={18} style={{ flexShrink: 0, marginTop: '2px' }} />
-          <div>{errorMsg}</div>
+      {error && (
+        <div className="auth-alert auth-alert-error" role="alert">
+          {error}
         </div>
       )}
 
-      {successMsg && (
-        <div className="auth-alert auth-alert-success">
-          <CheckCircle2 size={18} style={{ flexShrink: 0, marginTop: '2px' }} />
-          <div>{successMsg}</div>
-        </div>
-      )}
-
-      <form onSubmit={handleSubmit}>
+      <form className="auth-form" onSubmit={handleSubmit}>
+        {/* Dynamic Organization Field */}
         <div className="form-group">
           <label className="form-label" htmlFor="reg-org">
             {currentRoleConfig.orgLabel}
           </label>
           <div className="input-wrapper">
-            <Building2 size={18} className="input-icon-left" />
+            <span className="input-icon">🏛️</span>
             <input
               id="reg-org"
               type="text"
@@ -194,138 +213,146 @@ export default function RegisterView({ onRegisterSuccess, onNavigate }) {
               placeholder={currentRoleConfig.orgPlaceholder}
               value={organization}
               onChange={(e) => setOrganization(e.target.value)}
-              disabled={isLoading}
+              disabled={loading}
               required
             />
           </div>
         </div>
 
+        {/* Dynamic Full Name Field */}
         <div className="form-group">
-          <label className="form-label" htmlFor="reg-fullname">
+          <label className="form-label" htmlFor="reg-name">
             {currentRoleConfig.nameLabel}
           </label>
           <div className="input-wrapper">
-            <User size={18} className="input-icon-left" />
+            <span className="input-icon">👤</span>
             <input
-              id="reg-fullname"
+              id="reg-name"
               type="text"
               className="auth-input"
               placeholder={currentRoleConfig.namePlaceholder}
               value={fullName}
               onChange={(e) => setFullName(e.target.value)}
-              disabled={isLoading}
+              disabled={loading}
               required
             />
           </div>
         </div>
 
+        {/* Password */}
         <div className="form-group">
-          <label className="form-label" htmlFor="reg-email">
-            {currentRoleConfig.emailLabel}
-          </label>
-          <div className="input-wrapper">
-            <Mail size={18} className="input-icon-left" />
-            <input
-              id="reg-email"
-              type="email"
-              className="auth-input"
-              placeholder={currentRoleConfig.emailPlaceholder}
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              disabled={isLoading}
-              required
-              autoComplete="email"
-            />
+          <div className="form-label-row">
+            <label className="form-label" htmlFor="reg-password">Password</label>
+            <span className="form-hint">min 8 chars, 1 letter, 1 digit</span>
           </div>
-        </div>
-
-        <div className="form-group">
-          <label className="form-label" htmlFor="reg-password">
-            <span>Password</span>
-            <span style={{ fontSize: '0.75rem', color: '#94a3b8' }}>min 8 chars, 1 letter, 1 digit</span>
-          </label>
           <div className="input-wrapper">
-            <Lock size={18} className="input-icon-left" />
+            <span className="input-icon">🔒</span>
             <input
               id="reg-password"
               type={showPassword ? 'text' : 'password'}
               className="auth-input"
-              placeholder="Create a secure password"
+              placeholder="Create strong password"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
-              disabled={isLoading}
+              disabled={loading}
               required
-              autoComplete="new-password"
             />
             <button
               type="button"
-              className="input-action-btn"
+              className="input-eye-btn"
               onClick={() => setShowPassword(!showPassword)}
               aria-label={showPassword ? 'Hide password' : 'Show password'}
             >
-              {showPassword ? <EyeOff size={18} /> : <Eye size={18} />}
+              {showPassword ? '👁️' : '👁️‍🗨️'}
             </button>
           </div>
         </div>
 
+        {/* Confirm Password */}
         <div className="form-group">
-          <label className="form-label" htmlFor="reg-confirm-password">
-            Confirm Password
-          </label>
+          <label className="form-label" htmlFor="reg-confirm-password">Confirm Password</label>
           <div className="input-wrapper">
-            <Lock size={18} className="input-icon-left" />
+            <span className="input-icon">🔒</span>
             <input
               id="reg-confirm-password"
-              type={showConfirmPassword ? 'text' : 'password'}
+              type={showPassword ? 'text' : 'password'}
               className="auth-input"
-              placeholder="Re-enter your password"
+              placeholder="Re-enter password"
               value={confirmPassword}
               onChange={(e) => setConfirmPassword(e.target.value)}
-              disabled={isLoading}
+              disabled={loading}
               required
-              autoComplete="new-password"
+            />
+          </div>
+        </div>
+
+        {/* Recovery PIN */}
+        <div className="form-group">
+          <div className="form-label-row">
+            <label className="form-label" htmlFor="reg-pin">Recovery PIN</label>
+            <span className="form-hint">4–16 digits / characters</span>
+          </div>
+          <div className="input-wrapper">
+            <span className="input-icon">🔑</span>
+            <input
+              id="reg-pin"
+              type={showPin ? 'text' : 'password'}
+              className="auth-input"
+              placeholder="e.g. 7482 or security PIN"
+              value={recoveryPin}
+              onChange={(e) => setRecoveryPin(e.target.value)}
+              disabled={loading}
+              required
             />
             <button
               type="button"
-              className="input-action-btn"
-              onClick={() => setShowConfirmPassword(!showConfirmPassword)}
-              aria-label={showConfirmPassword ? 'Hide password' : 'Show password'}
+              className="input-eye-btn"
+              onClick={() => setShowPin(!showPin)}
+              aria-label={showPin ? 'Hide PIN' : 'Show PIN'}
             >
-              {showConfirmPassword ? <EyeOff size={18} /> : <Eye size={18} />}
+              {showPin ? '👁️' : '👁️‍🗨️'}
             </button>
+          </div>
+          <p className="form-subhint">Used to reset your password if you ever forget it. Never shared with anyone.</p>
+        </div>
+
+        {/* Confirm Recovery PIN */}
+        <div className="form-group">
+          <label className="form-label" htmlFor="reg-confirm-pin">Confirm Recovery PIN</label>
+          <div className="input-wrapper">
+            <span className="input-icon">🔑</span>
+            <input
+              id="reg-confirm-pin"
+              type={showPin ? 'text' : 'password'}
+              className="auth-input"
+              placeholder="Re-enter recovery PIN"
+              value={confirmRecoveryPin}
+              onChange={(e) => setConfirmRecoveryPin(e.target.value)}
+              disabled={loading}
+              required
+            />
           </div>
         </div>
 
         <button
           type="submit"
-          className="auth-submit-btn"
-          disabled={isLoading}
+          className="auth-btn auth-btn-primary"
+          disabled={loading}
         >
-          {isLoading ? (
-            <>
-              <Loader2 size={18} className="animate-spin" />
-              <span>Creating Account...</span>
-            </>
-          ) : (
-            <>
-              <span>Complete Registration</span>
-              <ArrowRight size={18} />
-            </>
-          )}
+          {loading ? 'Generating User ID...' : 'Complete Registration →'}
         </button>
       </form>
 
       <div className="auth-footer">
-        <div>
-          Already have an account?{' '}
-          <button
-            type="button"
-            className="auth-link"
-            onClick={() => onNavigate('login')}
-          >
-            Sign in
-          </button>
-        </div>
+        <span>Already have a User ID?</span>
+        <button
+          type="button"
+          className="auth-link-btn"
+          onClick={() => onSwitchToLogin()}
+          disabled={loading}
+        >
+          Sign in
+        </button>
       </div>
     </div>
   );

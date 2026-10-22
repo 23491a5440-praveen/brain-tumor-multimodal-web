@@ -34,112 +34,77 @@ def get_db():
         conn.close()
 
 def init_db():
-    """Initializes the database schema if tables do not exist, and migrates existing tables if needed."""
+    """Initializes the database schema for User ID + Recovery PIN authentication."""
     with get_db() as conn:
         cursor = conn.cursor()
         
-        # 1. Users table (always create if not exists)
-        cursor.execute("""
-        CREATE TABLE IF NOT EXISTS users (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            email TEXT UNIQUE NOT NULL COLLATE NOCASE,
-            role TEXT NOT NULL CHECK(role IN ('student', 'hospital', 'clinic', 'researcher')),
-            full_name TEXT NOT NULL,
-            organization TEXT NOT NULL,
-            password_hash TEXT NOT NULL,
-            salt TEXT NOT NULL,
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-        );
-        """)
-
-        # Check if existing users table needs migration for 4 roles
+        # 1. Check existing users table
         cursor.execute("SELECT sql FROM sqlite_master WHERE type='table' AND name='users';")
         existing_users_table = cursor.fetchone()
-        if existing_users_table and existing_users_table["sql"] and "'clinic'" not in existing_users_table["sql"]:
-            logger.info("Migrating users table to support 4 registration roles...")
-            cursor.execute("PRAGMA foreign_keys = OFF;")
-            cursor.execute("ALTER TABLE users RENAME TO users_old;")
+
+        if not existing_users_table:
             cursor.execute("""
             CREATE TABLE users (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
-                email TEXT UNIQUE NOT NULL COLLATE NOCASE,
+                user_id TEXT UNIQUE NOT NULL COLLATE NOCASE,
                 role TEXT NOT NULL CHECK(role IN ('student', 'hospital', 'clinic', 'researcher')),
                 full_name TEXT NOT NULL,
                 organization TEXT NOT NULL,
                 password_hash TEXT NOT NULL,
                 salt TEXT NOT NULL,
+                recovery_pin_hash TEXT NOT NULL,
+                recovery_pin_salt TEXT NOT NULL,
+                failed_reset_attempts INTEGER DEFAULT 0,
+                last_failed_attempt TIMESTAMP,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             );
             """)
-            cursor.execute("""
-                INSERT INTO users (id, email, role, full_name, organization, password_hash, salt, created_at, updated_at)
-                SELECT id, email, role, full_name, organization, password_hash, salt, created_at, updated_at FROM users_old;
-            """)
-            cursor.execute("DROP TABLE users_old;")
-            cursor.execute("PRAGMA foreign_keys = ON;")
-            logger.info("Users table successfully migrated to 4 roles.")
+            logger.info("Created new users table with User ID and Recovery PIN support.")
+        else:
+            # Check if existing table needs user_id and recovery_pin columns
+            cursor.execute("PRAGMA table_info(users);")
+            columns = [col["name"] for col in cursor.fetchall()]
+            
+            if "user_id" not in columns or "recovery_pin_hash" not in columns:
+                logger.info("Migrating users table to add user_id and recovery_pin...")
+                cursor.execute("PRAGMA foreign_keys = OFF;")
+                cursor.execute("ALTER TABLE users RENAME TO users_backup_v1;")
+                cursor.execute("""
+                CREATE TABLE users (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    user_id TEXT UNIQUE NOT NULL COLLATE NOCASE,
+                    role TEXT NOT NULL CHECK(role IN ('student', 'hospital', 'clinic', 'researcher')),
+                    full_name TEXT NOT NULL,
+                    organization TEXT NOT NULL,
+                    password_hash TEXT NOT NULL,
+                    salt TEXT NOT NULL,
+                    recovery_pin_hash TEXT NOT NULL,
+                    recovery_pin_salt TEXT NOT NULL,
+                    failed_reset_attempts INTEGER DEFAULT 0,
+                    last_failed_attempt TIMESTAMP,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                );
+                """)
+                cursor.execute("PRAGMA foreign_keys = ON;")
+                logger.info("Users table schema migrated successfully.")
 
-        # 2. Sessions table (always create if not exists)
+        # 2. Sessions table
         cursor.execute("""
         CREATE TABLE IF NOT EXISTS sessions (
             token TEXT PRIMARY KEY,
-            user_id INTEGER NOT NULL,
+            user_id TEXT NOT NULL,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             expires_at TIMESTAMP NOT NULL,
-            user_agent TEXT,
-            FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
-        );
-        """)
-
-        # Check if sessions table needs foreign key repair from users_old
-        cursor.execute("SELECT sql FROM sqlite_master WHERE type='table' AND name='sessions';")
-        sessions_table = cursor.fetchone()
-        if sessions_table and sessions_table["sql"] and "users_old" in sessions_table["sql"]:
-            logger.info("Repairing sessions table foreign key to users...")
-            cursor.execute("PRAGMA foreign_keys = OFF;")
-            cursor.execute("ALTER TABLE sessions RENAME TO sessions_old;")
-            cursor.execute("""
-            CREATE TABLE sessions (
-                token TEXT PRIMARY KEY,
-                user_id INTEGER NOT NULL,
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                expires_at TIMESTAMP NOT NULL,
-                user_agent TEXT,
-                FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
-            );
-            """)
-            cursor.execute("""
-                INSERT INTO sessions (token, user_id, created_at, expires_at, user_agent)
-                SELECT token, user_id, created_at, expires_at, user_agent FROM sessions_old;
-            """)
-            cursor.execute("DROP TABLE sessions_old;")
-            cursor.execute("PRAGMA foreign_keys = ON;")
-            logger.info("Sessions table foreign key repaired.")
-
-        # 3. Password reset OTPs table
-        cursor.execute("""
-        CREATE TABLE IF NOT EXISTS password_resets (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            email TEXT NOT NULL COLLATE NOCASE,
-            otp_hash TEXT NOT NULL,
-            salt TEXT NOT NULL,
-            reset_token TEXT,
-            attempts_left INTEGER NOT NULL DEFAULT 5,
-            used INTEGER NOT NULL DEFAULT 0,
-            expires_at TIMESTAMP NOT NULL,
-            reset_token_expires_at TIMESTAMP,
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            user_agent TEXT
         );
         """)
 
         # Indexes for fast lookup
-        cursor.execute("CREATE INDEX IF NOT EXISTS idx_users_email ON users(email);")
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_users_user_id ON users(user_id);")
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_sessions_token ON sessions(token);")
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_sessions_user_id ON sessions(user_id);")
-        cursor.execute("CREATE INDEX IF NOT EXISTS idx_password_resets_email ON password_resets(email);")
-        cursor.execute("CREATE INDEX IF NOT EXISTS idx_password_resets_token ON password_resets(reset_token);")
 
         logger.info("Database schema verified at %s", DB_PATH)
 

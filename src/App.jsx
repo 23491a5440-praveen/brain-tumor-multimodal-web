@@ -257,13 +257,13 @@ function App() {
           <a href="#about" className={`nav-link ${activeSection === 'about' ? 'active' : ''}`}>About</a>
 
           <div className="user-profile-nav">
-            <div className="user-badge-pill" title={`${user.organization} (${user.email})`}>
+            <div className="user-badge-pill" title={`${user.organization} (${user.user_id})`}>
               {user.role === 'hospital' && <Building2 size={14} style={{ color: '#34d399' }} />}
               {user.role === 'clinic' && <Activity size={14} style={{ color: '#fbbf24' }} />}
               {user.role === 'student' && <GraduationCap size={14} style={{ color: '#38bdf8' }} />}
               {user.role === 'researcher' && <Microscope size={14} style={{ color: '#c084fc' }} />}
               <span>{user.full_name}</span>
-              <span className={`user-role-tag ${user.role}`}>{user.role}</span>
+              <span className={`user-role-tag ${user.role}`}>{user.user_id || user.role}</span>
             </div>
             <button
               type="button"
