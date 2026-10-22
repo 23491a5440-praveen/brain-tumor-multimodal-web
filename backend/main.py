@@ -17,10 +17,13 @@ from fastapi import FastAPI, File, UploadFile, HTTPException, Response, status, 
 from fastapi.middleware.cors import CORSMiddleware
 from torchvision import transforms
 
-# Allow importing the trained model
+# Allow importing the trained model and backend modules
 PROJECT_DIR = Path(__file__).resolve().parent.parent
 TRAINING_DIR = PROJECT_DIR / "training"
+BACKEND_DIR = PROJECT_DIR / "backend"
 sys.path.insert(0, str(TRAINING_DIR))
+sys.path.insert(0, str(PROJECT_DIR))
+sys.path.insert(0, str(BACKEND_DIR))
 
 from model import NeuroScanModel
 
@@ -56,8 +59,12 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-from backend.auth_routes import auth_router
+try:
+    from backend.auth_routes import auth_router
+except ImportError:
+    from auth_routes import auth_router
 app.include_router(auth_router)
+
 
 
 MODEL_PATH = PROJECT_DIR / "models" / "best_model.pth"

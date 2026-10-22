@@ -17,6 +17,28 @@ export function getApiBaseUrl() {
 const TOKEN_KEY = 'neuroscan_auth_token';
 const USER_KEY = 'neuroscan_auth_user';
 
+async function parseApiResponse(response, defaultMsg) {
+  let data = null;
+  try {
+    data = await response.json();
+  } catch {
+    data = null;
+  }
+
+  if (!response.ok) {
+    if (response.status === 404) {
+      throw new Error('Authentication service endpoint not found (HTTP 404). The backend server may still be deploying.');
+    }
+    if (response.status === 502 || response.status === 503) {
+      throw new Error(`The backend server is temporarily unavailable or restarting (HTTP ${response.status}). Please try again shortly.`);
+    }
+    const message = data && data.detail ? data.detail : defaultMsg;
+    throw new Error(message);
+  }
+
+  return data;
+}
+
 export const authService = {
   // Session storage helpers
   saveSession(token, user) {
@@ -69,12 +91,7 @@ export const authService = {
         organization
       })
     });
-
-    const data = await response.json();
-    if (!response.ok) {
-      throw new Error(data.detail || 'Registration failed. Please check your information.');
-    }
-    return data;
+    return await parseApiResponse(response, 'Registration failed. Please check your information.');
   },
 
   async login({ email, password }) {
@@ -84,13 +101,8 @@ export const authService = {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ email, password })
     });
-
-    const data = await response.json();
-    if (!response.ok) {
-      throw new Error(data.detail || 'Invalid email or password.');
-    }
-
-    if (data.token && data.user) {
+    const data = await parseApiResponse(response, 'Invalid email or password.');
+    if (data && data.token && data.user) {
       this.saveSession(data.token, data.user);
     }
     return data;
@@ -154,12 +166,7 @@ export const authService = {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ email })
     });
-
-    const data = await response.json();
-    if (!response.ok) {
-      throw new Error(data.detail || 'Unable to request verification code. Please try again.');
-    }
-    return data;
+    return await parseApiResponse(response, 'Unable to request verification code. Please try again.');
   },
 
   async verifyPasswordResetOtp(email, otp) {
@@ -169,12 +176,7 @@ export const authService = {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ email, otp })
     });
-
-    const data = await response.json();
-    if (!response.ok) {
-      throw new Error(data.detail || 'Invalid verification code.');
-    }
-    return data;
+    return await parseApiResponse(response, 'Invalid verification code.');
   },
 
   async resetPassword({ email, resetToken, newPassword, confirmPassword }) {
@@ -189,11 +191,7 @@ export const authService = {
         confirm_password: confirmPassword
       })
     });
-
-    const data = await response.json();
-    if (!response.ok) {
-      throw new Error(data.detail || 'Failed to update password.');
-    }
-    return data;
+    return await parseApiResponse(response, 'Failed to update password.');
   }
 };
+

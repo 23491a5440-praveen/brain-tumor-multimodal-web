@@ -6,18 +6,33 @@ from typing import Optional
 from fastapi import APIRouter, HTTPException, Depends, Header, Request, status
 from pydantic import BaseModel, Field
 
-from backend.database import get_db, init_db
-from backend.auth_utils import (
-    is_valid_email,
-    validate_password_strength,
-    hash_password,
-    verify_password,
-    generate_session_token,
-    generate_otp,
-    hash_otp,
-    verify_otp,
-)
-from backend.email_service import send_password_reset_otp_email, get_smtp_config
+try:
+    from backend.database import get_db, init_db
+    from backend.auth_utils import (
+        is_valid_email,
+        validate_password_strength,
+        hash_password,
+        verify_password,
+        generate_session_token,
+        generate_otp,
+        hash_otp,
+        verify_otp,
+    )
+    from backend.email_service import send_password_reset_otp_email, get_smtp_config
+except ImportError:
+    from database import get_db, init_db
+    from auth_utils import (
+        is_valid_email,
+        validate_password_strength,
+        hash_password,
+        verify_password,
+        generate_session_token,
+        generate_otp,
+        hash_otp,
+        verify_otp,
+    )
+    from email_service import send_password_reset_otp_email, get_smtp_config
+
 
 logger = logging.getLogger("neuroscan.auth.routes")
 auth_router = APIRouter(prefix="/api/auth", tags=["Authentication"])
