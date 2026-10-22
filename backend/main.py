@@ -56,6 +56,9 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+from backend.auth_routes import auth_router
+app.include_router(auth_router)
+
 
 MODEL_PATH = PROJECT_DIR / "models" / "best_model.pth"
 EXPERIMENTAL_MODEL_PATH = PROJECT_DIR / "models" / "best_model_finetuned_experiment.pth"
