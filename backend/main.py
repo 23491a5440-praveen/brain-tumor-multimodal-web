@@ -1,3 +1,4 @@
+import os
 import sys
 import base64
 import io
@@ -29,29 +30,55 @@ logger = logging.getLogger("neuroscan.backend")
 
 app = FastAPI(title="NeuroScan AI API")
 
+# Configure CORS: Allow Netlify production domains (*.netlify.app),
+# custom domains via ALLOWED_ORIGINS env var, and local development origins.
+env_origins = os.getenv("ALLOWED_ORIGINS", "")
+allowed_origins = [orig.strip() for orig in env_origins.split(",") if orig.strip()]
+
+default_dev_origins = [
+    "http://localhost:5173",
+    "http://127.0.0.1:5173",
+    "http://localhost:3000",
+    "http://127.0.0.1:3000",
+    "http://localhost:8000",
+    "http://127.0.0.1:8000",
+]
+for origin in default_dev_origins:
+    if origin not in allowed_origins:
+        allowed_origins.append(origin)
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=False,
+    allow_origins=allowed_origins,
+    allow_origin_regex=r"^https:\/\/[a-zA-Z0-9_\-]+\.netlify\.app$",
+    allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
+
 MODEL_PATH = PROJECT_DIR / "models" / "best_model.pth"
 EXPERIMENTAL_MODEL_PATH = PROJECT_DIR / "models" / "best_model_finetuned_experiment.pth"
+FAST_MODEL_PATH = PROJECT_DIR / "models" / "neuroscan_fast_model.pth"
 
 device = torch.device("cpu")
 model = None
 model_load_error = None
 experimental_model = None
 experimental_model_load_error = None
+fast_model = None
+fast_model_load_error = None
 
 def load_model_checkpoint(path: Path) -> NeuroScanModel:
     """Safely loads model weights from a state_dict or wrapped checkpoint dictionary."""
     if not path.exists():
         raise FileNotFoundError(f"Model checkpoint not found at: {path}")
 
-    checkpoint = torch.load(path, map_location=device)
+    try:
+        checkpoint = torch.load(path, map_location=device, weights_only=False)
+    except TypeError:
+        checkpoint = torch.load(path, map_location=device)
+
     if isinstance(checkpoint, dict) and "model_state_dict" in checkpoint:
         state_dict = checkpoint["model_state_dict"]
     elif isinstance(checkpoint, dict):
@@ -82,6 +109,17 @@ try:
 except Exception as e:
     experimental_model_load_error = str(e)
     logger.warning("Failed to load experimental model from %s: %s", EXPERIMENTAL_MODEL_PATH.name, e, exc_info=True)
+
+try:
+    if FAST_MODEL_PATH.exists():
+        fast_model = load_model_checkpoint(FAST_MODEL_PATH)
+        logger.info("Fast model loaded successfully from %s", FAST_MODEL_PATH.name)
+    else:
+        fast_model_load_error = f"Checkpoint file not found: {FAST_MODEL_PATH.name}"
+        logger.info("Fast model checkpoint not found at %s", FAST_MODEL_PATH)
+except Exception as e:
+    fast_model_load_error = str(e)
+    logger.warning("Failed to load fast model from %s: %s", FAST_MODEL_PATH.name, e, exc_info=True)
 
 transform = transforms.Compose([
     transforms.Resize((224, 224)),
@@ -184,13 +222,23 @@ def health(response: Response):
 
 @app.post("/predict")
 async def predict(
-    ct_image: UploadFile = File(...),
-    mri_image: UploadFile = File(...),
+    ct_image: UploadFile | None = File(default=None),
+    mri_image: UploadFile | None = File(default=None),
     x_model_variant: str | None = Header(default=None, alias="X-Model-Variant")
 ):
-    is_experimental = bool(x_model_variant and x_model_variant.strip().lower() == "experimental")
+    variant = x_model_variant.strip().lower() if x_model_variant else None
+    is_experimental = (variant == "experimental")
+    is_fast = (variant == "fast")
 
-    if is_experimental:
+    if is_fast:
+        if fast_model is None:
+            logger.error("Fast model prediction rejected: model not loaded (%s)", fast_model_load_error)
+            raise HTTPException(
+                status_code=503,
+                detail=f"Fast model is unavailable: {fast_model_load_error or 'model not loaded'}."
+            )
+        active_model = fast_model
+    elif is_experimental:
         if experimental_model is None:
             logger.error("Experimental prediction rejected: model not loaded (%s)", experimental_model_load_error)
             raise HTTPException(
@@ -207,19 +255,31 @@ async def predict(
             )
         active_model = model
 
-    if not ct_image.content_type or not ct_image.content_type.startswith("image/"):
-        raise HTTPException(status_code=400, detail="CT scan must be an image file.")
+    # Validate that at least one scan is provided
+    has_ct = ct_image is not None and bool(ct_image.filename)
+    has_mri = mri_image is not None and bool(mri_image.filename)
 
-    if not mri_image.content_type or not mri_image.content_type.startswith("image/"):
-        raise HTTPException(status_code=400, detail="MRI scan must be an image file.")
+    if not has_ct and not has_mri:
+        raise HTTPException(status_code=400, detail="At least one brain scan (CT or MRI) must be uploaded.")
 
-    ct_data = await ct_image.read()
-    mri_data = await mri_image.read()
+    ct_tensor = None
+    if has_ct:
+        if not ct_image.content_type or not ct_image.content_type.startswith("image/"):
+            raise HTTPException(status_code=400, detail="CT scan must be an image file.")
+        ct_data = await ct_image.read()
+        ct_tensor = prepare_image(ct_data, modality_name="CT scan")
 
-    ct_tensor = prepare_image(ct_data, modality_name="CT scan")
-    mri_tensor = prepare_image(mri_data, modality_name="MRI scan")
+    mri_tensor = None
+    if has_mri:
+        if not mri_image.content_type or not mri_image.content_type.startswith("image/"):
+            raise HTTPException(status_code=400, detail="MRI scan must be an image file.")
+        mri_data = await mri_image.read()
+        mri_tensor = prepare_image(mri_data, modality_name="MRI scan")
 
-    # Phase 1: Normal Prediction
+    if ct_tensor is None and mri_tensor is None:
+        raise HTTPException(status_code=400, detail="At least one valid scan (CT or MRI) must be provided.")
+
+    # Phase 1: Model Prediction (supports CT-only, MRI-only, and Multimodal via zero-imputation)
     with torch.no_grad():
         outputs = active_model(
             ct_images=ct_tensor,
@@ -234,16 +294,34 @@ async def predict(
 
     label = "Tumor" if predicted_class == 1 else "Healthy"
 
+    if ct_tensor is not None and mri_tensor is not None:
+        explanation = "The prediction is based on learned image features extracted from the uploaded CT and MRI scans using EfficientNet-B0 and combined through late fusion. This result is not a medical diagnosis."
+    elif ct_tensor is not None:
+        explanation = "The prediction is based on learned image features extracted from the uploaded CT scan using EfficientNet-B0 (with zero-imputation for MRI). This result is not a medical diagnosis."
+    else:
+        explanation = "The prediction is based on learned image features extracted from the uploaded MRI scan using EfficientNet-B0 (with zero-imputation for CT). This result is not a medical diagnosis."
+
     response_payload = {
         "status": "success",
         "prediction": label,
         "confidence": round(confidence, 2),
         "message": "AI-assisted prediction generated for research and educational purposes.",
-        "explanation": "The prediction is based on learned image features extracted from the uploaded CT and MRI scans using EfficientNet-B0 and combined through late fusion. This result is not a medical diagnosis.",
+        "explanation": explanation,
         "ct_heatmap": ct_base64,
         "mri_heatmap": mri_base64
     }
-    if is_experimental:
+    if is_fast:
+        response_payload["model_variant"] = "fast"
+        response_payload["warning"] = "Early/unconverged experimental test model. Not calibrated for medical diagnosis."
+    elif is_experimental:
         response_payload["model_variant"] = "experimental"
 
     return response_payload
+
+
+if __name__ == "__main__":
+    import uvicorn
+    port = int(os.getenv("PORT", 8000))
+    host = os.getenv("HOST", "0.0.0.0")
+    logger.info("Starting NeuroScan API server on %s:%s", host, port)
+    uvicorn.run("backend.main:app", host=host, port=port, reload=False)
