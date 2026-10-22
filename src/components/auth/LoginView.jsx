@@ -178,7 +178,7 @@ export default function LoginView({
 
         <div className="security-assurance-tag">
           <Lock size={12} className="text-teal" />
-          <span>End-to-End Cryptographic Session • Zero Plaintext Storage</span>
+          <span>Secure Clinical Authentication</span>
         </div>
       </div>
     </div>

@@ -72,8 +72,8 @@ export default function AuthPortal({ onLoginSuccess }) {
                 <Activity size={18} className="text-teal" />
               </div>
               <div>
-                <h4 className="feature-title">Sub-Millimeter Grad-CAM</h4>
-                <p className="feature-desc">Visual lesion localization heatmaps for explainable clinical validation.</p>
+                <h4 className="feature-title">Intelligent Brain Scan Analysis</h4>
+                <p className="feature-desc">AI-powered CT and MRI classification with clear diagnostic results.</p>
               </div>
             </div>
 
@@ -82,8 +82,8 @@ export default function AuthPortal({ onLoginSuccess }) {
                 <ShieldCheck size={18} className="text-teal" />
               </div>
               <div>
-                <h4 className="feature-title">Vault-Grade ID Security</h4>
-                <p className="feature-desc">Permanent clinical User IDs with PBKDF2-HMAC-SHA256 encrypted access and PIN recovery.</p>
+                <h4 className="feature-title">Secure Role-Based Access</h4>
+                <p className="feature-desc">Unique clinical User IDs with protected password access and PIN recovery.</p>
               </div>
             </div>
           </div>
@@ -95,13 +95,13 @@ export default function AuthPortal({ onLoginSuccess }) {
             </div>
             <div className="spec-divider"></div>
             <div className="spec-metric">
-              <span className="spec-value">100k</span>
-              <span className="spec-label">PBKDF2 Rounds</span>
+              <span className="spec-value">CT & MRI</span>
+              <span className="spec-label">Supported Modalities</span>
             </div>
             <div className="spec-divider"></div>
             <div className="spec-metric">
-              <span className="spec-value">0%</span>
-              <span className="spec-label">Email Vulnerability</span>
+              <span className="spec-value">Real-Time</span>
+              <span className="spec-label">Diagnostic Inference</span>
             </div>
           </div>
         </aside>
