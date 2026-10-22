@@ -90,8 +90,15 @@ def load_model_checkpoint(path: Path) -> NeuroScanModel:
     net.load_state_dict(state_dict, strict=True)
     net.to(device)
     net.eval()
+
+    # Clean up checkpoint dict immediately to conserve RAM on cloud free tiers
+    del checkpoint
+    del state_dict
+    gc.collect()
+
     return net
 
+# Load ONLY the primary default production model at startup to stay comfortably below 512MB RAM
 try:
     model = load_model_checkpoint(MODEL_PATH)
     logger.info("Default model loaded successfully from %s", MODEL_PATH.name)
@@ -99,27 +106,40 @@ except Exception as e:
     model_load_error = str(e)
     logger.error("Failed to load default model from %s: %s", MODEL_PATH.name, e, exc_info=True)
 
-try:
-    if EXPERIMENTAL_MODEL_PATH.exists():
-        experimental_model = load_model_checkpoint(EXPERIMENTAL_MODEL_PATH)
-        logger.info("Experimental model loaded successfully from %s", EXPERIMENTAL_MODEL_PATH.name)
-    else:
-        experimental_model_load_error = f"Checkpoint file not found: {EXPERIMENTAL_MODEL_PATH.name}"
-        logger.warning("Experimental model checkpoint not found at %s", EXPERIMENTAL_MODEL_PATH)
-except Exception as e:
-    experimental_model_load_error = str(e)
-    logger.warning("Failed to load experimental model from %s: %s", EXPERIMENTAL_MODEL_PATH.name, e, exc_info=True)
 
-try:
-    if FAST_MODEL_PATH.exists():
-        fast_model = load_model_checkpoint(FAST_MODEL_PATH)
-        logger.info("Fast model loaded successfully from %s", FAST_MODEL_PATH.name)
-    else:
-        fast_model_load_error = f"Checkpoint file not found: {FAST_MODEL_PATH.name}"
-        logger.info("Fast model checkpoint not found at %s", FAST_MODEL_PATH)
-except Exception as e:
-    fast_model_load_error = str(e)
-    logger.warning("Failed to load fast model from %s: %s", FAST_MODEL_PATH.name, e, exc_info=True)
+def get_experimental_model():
+    """Lazy-loads the experimental fine-tuned model on demand to save memory."""
+    global experimental_model, experimental_model_load_error
+    if experimental_model is None and experimental_model_load_error is None:
+        try:
+            if EXPERIMENTAL_MODEL_PATH.exists():
+                experimental_model = load_model_checkpoint(EXPERIMENTAL_MODEL_PATH)
+                logger.info("Experimental model loaded on demand from %s", EXPERIMENTAL_MODEL_PATH.name)
+            else:
+                experimental_model_load_error = f"Checkpoint file not found: {EXPERIMENTAL_MODEL_PATH.name}"
+                logger.warning("Experimental model checkpoint not found at %s", EXPERIMENTAL_MODEL_PATH)
+        except Exception as e:
+            experimental_model_load_error = str(e)
+            logger.warning("Failed to load experimental model from %s: %s", EXPERIMENTAL_MODEL_PATH.name, e, exc_info=True)
+    return experimental_model, experimental_model_load_error
+
+
+def get_fast_model():
+    """Lazy-loads the fast test model on demand to save memory."""
+    global fast_model, fast_model_load_error
+    if fast_model is None and fast_model_load_error is None:
+        try:
+            if FAST_MODEL_PATH.exists():
+                fast_model = load_model_checkpoint(FAST_MODEL_PATH)
+                logger.info("Fast model loaded on demand from %s", FAST_MODEL_PATH.name)
+            else:
+                fast_model_load_error = f"Checkpoint file not found: {FAST_MODEL_PATH.name}"
+                logger.info("Fast model checkpoint not found at %s", FAST_MODEL_PATH)
+        except Exception as e:
+            fast_model_load_error = str(e)
+            logger.warning("Failed to load fast model from %s: %s", FAST_MODEL_PATH.name, e, exc_info=True)
+    return fast_model, fast_model_load_error
+
 
 transform = transforms.Compose([
     transforms.Resize((224, 224)),
@@ -231,21 +251,21 @@ async def predict(
     is_fast = (variant == "fast")
 
     if is_fast:
-        if fast_model is None:
-            logger.error("Fast model prediction rejected: model not loaded (%s)", fast_model_load_error)
+        active_model, err = get_fast_model()
+        if active_model is None:
+            logger.error("Fast model prediction rejected: model not loaded (%s)", err)
             raise HTTPException(
                 status_code=503,
-                detail=f"Fast model is unavailable: {fast_model_load_error or 'model not loaded'}."
+                detail=f"Fast model is unavailable: {err or 'model not loaded'}."
             )
-        active_model = fast_model
     elif is_experimental:
-        if experimental_model is None:
-            logger.error("Experimental prediction rejected: model not loaded (%s)", experimental_model_load_error)
+        active_model, err = get_experimental_model()
+        if active_model is None:
+            logger.error("Experimental prediction rejected: model not loaded (%s)", err)
             raise HTTPException(
                 status_code=503,
-                detail=f"Experimental model is unavailable: {experimental_model_load_error or 'model not loaded'}."
+                detail=f"Experimental model is unavailable: {err or 'model not loaded'}."
             )
-        active_model = experimental_model
     else:
         if model is None:
             logger.error("Prediction rejected: default model not loaded (%s)", model_load_error)
@@ -254,6 +274,7 @@ async def predict(
                 detail="Inference service is currently unavailable: model is not loaded."
             )
         active_model = model
+
 
     # Validate that at least one scan is provided
     has_ct = ct_image is not None and bool(ct_image.filename)
