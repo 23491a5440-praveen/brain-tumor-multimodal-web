@@ -1,8 +1,12 @@
 import { useState, useRef, useEffect } from 'react';
-import { UploadCloud, Activity, BrainCircuit, X, Image as ImageIcon, ChevronRight, Settings, Layers, GitMerge, CheckCircle, Network, Info, Target, Cpu, AlertTriangle, ChevronDown } from 'lucide-react';
+import { UploadCloud, Activity, BrainCircuit, X, Image as ImageIcon, ChevronRight, Settings, Layers, GitMerge, CheckCircle, Network, Info, AlertTriangle, GraduationCap, Building2, Microscope, LogOut } from 'lucide-react';
 import './index.css';
+import AuthPortal from './components/auth/AuthPortal';
+import { authService } from './services/authService';
 
 function App() {
+  const [user, setUser] = useState(null);
+  const [isAuthChecking, setIsAuthChecking] = useState(true);
   const [ctImage, setCtImage] = useState(null);
   const [mriImage, setMriImage] = useState(null);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
@@ -15,6 +19,27 @@ function App() {
 
   const ctInputRef = useRef(null);
   const mriInputRef = useRef(null);
+
+  useEffect(() => {
+    let isMounted = true;
+    const verifyUser = async () => {
+      try {
+        const currentUser = await authService.getMe();
+        if (isMounted) setUser(currentUser);
+      } catch {
+        if (isMounted) setUser(null);
+      } finally {
+        if (isMounted) setIsAuthChecking(false);
+      }
+    };
+    verifyUser();
+    return () => { isMounted = false; };
+  }, []);
+
+  const handleLogout = async () => {
+    await authService.logout();
+    setUser(null);
+  };
 
   useEffect(() => {
     const handleScroll = () => {
@@ -138,8 +163,15 @@ function App() {
       const apiBaseUrl = String(rawApiUrl).replace(/\/+$/, '');
 
       
+      const token = authService.getToken();
+      const headers = {};
+      if (token) {
+        headers['Authorization'] = `Bearer ${token}`;
+      }
+
       const response = await fetch(`${apiBaseUrl}/predict`, {
         method: 'POST',
+        headers: headers,
         body: formData
       });
       
@@ -150,7 +182,9 @@ function App() {
           if (errData && errData.detail) {
             serverErrorMsg = typeof errData.detail === 'string' ? errData.detail : JSON.stringify(errData.detail);
           }
-        } catch (_) {}
+        } catch {
+          // JSON parse failure fallback
+        }
         throw new Error(serverErrorMsg);
       }
       
@@ -168,6 +202,19 @@ function App() {
       setIsAnalyzing(false);
     }
   };
+
+  if (isAuthChecking) {
+    return (
+      <div className="auth-wrapper" style={{ display: 'flex', flexDirection: 'column', gap: '1rem', alignItems: 'center', justifyContent: 'center' }}>
+        <div className="loader" style={{ width: 36, height: 36, borderWidth: 3 }}></div>
+        <p style={{ color: 'var(--text-secondary)', fontSize: '0.9rem' }}>Verifying NeuroScan AI session...</p>
+      </div>
+    );
+  }
+
+  if (!user) {
+    return <AuthPortal onLoginSuccess={(authenticatedUser) => setUser(authenticatedUser)} />;
+  }
 
   return (
     <div className="app-container">
@@ -208,6 +255,26 @@ function App() {
           <a href="#" onClick={(e) => { e.preventDefault(); window.scrollTo({top: 0, behavior: 'smooth'}); }} className={`nav-link ${activeSection === 'home' ? 'active' : ''}`}>Home</a>
           <a href="#how-it-works" className={`nav-link ${activeSection === 'how-it-works' ? 'active' : ''}`}>How It Works</a>
           <a href="#about" className={`nav-link ${activeSection === 'about' ? 'active' : ''}`}>About</a>
+
+          <div className="user-profile-nav">
+            <div className="user-badge-pill" title={`${user.organization} (${user.email})`}>
+              {user.role === 'hospital' && <Building2 size={14} style={{ color: '#34d399' }} />}
+              {user.role === 'clinic' && <Activity size={14} style={{ color: '#fbbf24' }} />}
+              {user.role === 'student' && <GraduationCap size={14} style={{ color: '#38bdf8' }} />}
+              {user.role === 'researcher' && <Microscope size={14} style={{ color: '#c084fc' }} />}
+              <span>{user.full_name}</span>
+              <span className={`user-role-tag ${user.role}`}>{user.role}</span>
+            </div>
+            <button
+              type="button"
+              className="signout-btn"
+              onClick={handleLogout}
+              title="Sign out of NeuroScan AI"
+            >
+              <LogOut size={14} />
+              <span>Sign Out</span>
+            </button>
+          </div>
         </nav>
       </header>
 

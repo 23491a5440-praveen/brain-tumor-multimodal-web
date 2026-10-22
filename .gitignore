@@ -30,3 +30,9 @@ venv/
 .env
 .env.*
 !.env.example
+
+# Database & Auth
+*.db
+*.sqlite
+*.sqlite3
+backend/data/
