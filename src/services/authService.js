@@ -17,6 +17,38 @@ export function getApiBaseUrl() {
 const TOKEN_KEY = 'neuroscan_auth_token';
 const USER_KEY = 'neuroscan_auth_user';
 
+export function formatApiError(detail, defaultMsg = 'An unexpected error occurred. Please try again.') {
+  if (!detail) return defaultMsg;
+  if (typeof detail === 'string') return detail;
+  
+  if (Array.isArray(detail)) {
+    // FastAPI validation errors: [{loc: ['body', 'password'], msg: 'field required'}]
+    return detail.map(item => {
+      if (typeof item === 'string') return item;
+      if (item && typeof item === 'object') {
+        const fieldName = Array.isArray(item.loc) && item.loc.length > 0 
+          ? String(item.loc[item.loc.length - 1]).replace(/_/g, ' ') 
+          : '';
+        const msg = item.msg || 'Invalid value';
+        return fieldName ? `${fieldName}: ${msg}` : msg;
+      }
+      return String(item);
+    }).join('. ');
+  }
+
+  if (typeof detail === 'object') {
+    try {
+      return Object.entries(detail)
+        .map(([k, v]) => `${k.replace(/_/g, ' ')}: ${typeof v === 'object' ? JSON.stringify(v) : v}`)
+        .join('. ');
+    } catch {
+      return defaultMsg;
+    }
+  }
+
+  return String(detail);
+}
+
 async function parseApiResponse(response, defaultMsg) {
   let data = null;
   try {
@@ -27,12 +59,13 @@ async function parseApiResponse(response, defaultMsg) {
 
   if (!response.ok) {
     if (response.status === 404) {
-      throw new Error('Authentication endpoint not found (HTTP 404). Please ensure the backend is active.');
+      throw new Error('Authentication service endpoint not found (HTTP 404). Please ensure the backend is active.');
     }
     if (response.status === 502 || response.status === 503) {
-      throw new Error(`The backend server is temporarily waking up (HTTP ${response.status}). Please try again shortly.`);
+      throw new Error(`The backend server is temporarily waking up or restarting (HTTP ${response.status}). Please wait a moment and try again.`);
     }
-    const message = data && data.detail ? data.detail : defaultMsg;
+    const rawDetail = data && data.detail !== undefined ? data.detail : (data && data.message !== undefined ? data.message : null);
+    const message = formatApiError(rawDetail, defaultMsg);
     throw new Error(message);
   }
 
@@ -79,37 +112,51 @@ export const authService = {
   // API Calls
   async register({ role, fullName, organization, password, confirmPassword, recoveryPin, confirmRecoveryPin }) {
     const baseUrl = getApiBaseUrl();
-    const response = await fetch(`${baseUrl}/api/auth/register`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        role,
-        full_name: fullName,
-        organization,
-        password,
-        confirm_password: confirmPassword,
-        recovery_pin: recoveryPin,
-        confirm_recovery_pin: confirmRecoveryPin
-      })
-    });
-    return await parseApiResponse(response, 'Registration failed. Please check your information.');
+    try {
+      const response = await fetch(`${baseUrl}/api/auth/register`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          role,
+          full_name: fullName,
+          organization,
+          password,
+          confirm_password: confirmPassword,
+          recovery_pin: recoveryPin,
+          confirm_recovery_pin: confirmRecoveryPin
+        })
+      });
+      return await parseApiResponse(response, 'Registration failed. Please check your information.');
+    } catch (err) {
+      if (err.message && !err.message.includes('fetch')) {
+        throw err;
+      }
+      throw new Error('Unable to connect to NeuroScan AI server. Please check your network connection.');
+    }
   },
 
   async login({ userId, password }) {
     const baseUrl = getApiBaseUrl();
-    const response = await fetch(`${baseUrl}/api/auth/login`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        user_id: userId,
-        password
-      })
-    });
-    const data = await parseApiResponse(response, 'Invalid User ID or password.');
-    if (data && data.token && data.user) {
-      this.saveSession(data.token, data.user);
+    try {
+      const response = await fetch(`${baseUrl}/api/auth/login`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          user_id: userId,
+          password
+        })
+      });
+      const data = await parseApiResponse(response, 'Invalid User ID or password.');
+      if (data && data.token && data.user) {
+        this.saveSession(data.token, data.user);
+      }
+      return data;
+    } catch (err) {
+      if (err.message && !err.message.includes('fetch')) {
+        throw err;
+      }
+      throw new Error('Unable to connect to NeuroScan AI server. Please check your network connection.');
     }
-    return data;
   },
 
   async getMe() {
@@ -165,16 +212,23 @@ export const authService = {
 
   async resetPassword({ userId, recoveryPin, newPassword, confirmPassword }) {
     const baseUrl = getApiBaseUrl();
-    const response = await fetch(`${baseUrl}/api/auth/reset-password`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        user_id: userId,
-        recovery_pin: recoveryPin,
-        new_password: newPassword,
-        confirm_password: confirmPassword
-      })
-    });
-    return await parseApiResponse(response, 'Failed to reset password. Please check your User ID and Recovery PIN.');
+    try {
+      const response = await fetch(`${baseUrl}/api/auth/reset-password`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          user_id: userId,
+          recovery_pin: recoveryPin,
+          new_password: newPassword,
+          confirm_password: confirmPassword
+        })
+      });
+      return await parseApiResponse(response, 'Failed to reset password. Please check your User ID and Recovery PIN.');
+    } catch (err) {
+      if (err.message && !err.message.includes('fetch')) {
+        throw err;
+      }
+      throw new Error('Unable to connect to NeuroScan AI server. Please check your network connection.');
+    }
   }
 };

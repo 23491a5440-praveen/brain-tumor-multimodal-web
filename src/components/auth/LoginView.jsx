@@ -1,5 +1,6 @@
-import React, { useState } from 'react';
-import { authService } from '../../services/authService';
+import { useState } from 'react';
+import { Lock, User, ArrowRight, Eye, EyeOff, AlertCircle, KeyRound, UserPlus } from 'lucide-react';
+import { authService, formatApiError } from '../../services/authService';
 
 export default function LoginView({
   initialUserId = '',
@@ -19,7 +20,6 @@ export default function LoginView({
     setUserId(initialUserId);
   }
 
-
   const handleSubmit = async (e) => {
     e.preventDefault();
     setError('');
@@ -30,7 +30,7 @@ export default function LoginView({
       return;
     }
     if (!password) {
-      setError('Please enter your password.');
+      setError('Please enter your account password.');
       return;
     }
 
@@ -44,7 +44,8 @@ export default function LoginView({
         onSuccess(data.user);
       }
     } catch (err) {
-      setError(err.message || 'Invalid User ID or password.');
+      const errorMsg = formatApiError(err?.message, 'Invalid User ID or password. Please verify your credentials.');
+      setError(errorMsg);
     } finally {
       setLoading(false);
     }
@@ -52,64 +53,76 @@ export default function LoginView({
 
   return (
     <div className="auth-card">
-      <div className="auth-header">
-        <div className="auth-icon-badge">🧠</div>
-        <h2 className="auth-title">
-          NeuroScan AI <span className="text-highlight">Portal</span>
-        </h2>
-        <p className="auth-subtitle">
-          Enter your User ID and password to access the clinical portal
+      <div className="card-header">
+        <div className="card-icon-pill">
+          <Lock size={18} className="text-teal" />
+          <span>AUTHORIZED ACCESS</span>
+        </div>
+        <h2 className="card-title">Sign In to NeuroScan AI</h2>
+        <p className="card-subtitle">
+          Enter your assigned User ID and secure password to initiate a clinical session.
         </p>
       </div>
 
       {error && (
-        <div className="auth-alert auth-alert-error" role="alert">
-          {error}
+        <div className="auth-feedback-alert error" role="alert">
+          <AlertCircle size={18} className="alert-icon" />
+          <div className="alert-content">
+            <span className="alert-title">Authentication Error</span>
+            <span className="alert-message">{error}</span>
+          </div>
         </div>
       )}
 
-      <form className="auth-form" onSubmit={handleSubmit}>
-        <div className="form-group">
-          <label className="form-label" htmlFor="login-user-id">
-            NeuroScan User ID
+      <form className="auth-form-layout" onSubmit={handleSubmit} noValidate>
+        {/* User ID Field */}
+        <div className="form-field-group">
+          <label className="field-label" htmlFor="login-userid">
+            Permanent User ID
           </label>
-          <div className="input-wrapper">
-            <span className="input-icon">🪪</span>
+          <div className="field-input-box">
+            <User size={18} className="field-icon" />
             <input
-              id="login-user-id"
+              id="login-userid"
               type="text"
-              className="auth-input uppercase-input"
+              className="field-text-input uppercase-text"
               placeholder="e.g. NS-STU-482910 or NS-HOSP-..."
               value={userId}
               onChange={(e) => setUserId(e.target.value.toUpperCase())}
               autoComplete="username"
               disabled={loading}
+              spellCheck="false"
               required
             />
           </div>
+          <span className="field-helper-text">
+            Provided during account registration (e.g. NS-STU-XXXXXX, NS-HOSP-XXXXXX).
+          </span>
         </div>
 
-        <div className="form-group">
-          <div className="form-label-row">
-            <label className="form-label" htmlFor="login-password">
-              Password
+        {/* Password Field */}
+        <div className="form-field-group">
+          <div className="field-label-split">
+            <label className="field-label" htmlFor="login-pass">
+              Account Password
             </label>
             <button
               type="button"
-              className="auth-link-btn form-link"
+              className="field-action-link"
               onClick={onSwitchToForgotPassword}
               disabled={loading}
             >
-              Forgot password?
+              <KeyRound size={12} />
+              <span>Forgot password?</span>
             </button>
           </div>
-          <div className="input-wrapper">
-            <span className="input-icon">🔒</span>
+          <div className="field-input-box">
+            <Lock size={18} className="field-icon" />
             <input
-              id="login-password"
+              id="login-pass"
               type={showPassword ? 'text' : 'password'}
-              className="auth-input"
-              placeholder="Enter your account password"
+              className="field-text-input"
+              placeholder="Enter your password"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
               autoComplete="current-password"
@@ -118,38 +131,55 @@ export default function LoginView({
             />
             <button
               type="button"
-              className="input-eye-btn"
+              className="field-toggle-btn"
               onClick={() => setShowPassword(!showPassword)}
               aria-label={showPassword ? 'Hide password' : 'Show password'}
+              tabIndex={-1}
             >
-              {showPassword ? '👁️' : '👁️‍🗨️'}
+              {showPassword ? <EyeOff size={16} /> : <Eye size={16} />}
             </button>
           </div>
         </div>
 
+        {/* Submit Action */}
         <button
           type="submit"
-          className="auth-btn auth-btn-primary"
+          className="auth-action-btn primary"
           disabled={loading}
         >
-          {loading ? 'Authenticating...' : 'Sign In to NeuroScan AI →'}
+          {loading ? (
+            <span className="btn-loading-state">
+              <span className="mini-spinner"></span>
+              <span>Authenticating Session...</span>
+            </span>
+          ) : (
+            <span className="btn-content-state">
+              <span>Sign In to Dashboard</span>
+              <ArrowRight size={17} />
+            </span>
+          )}
         </button>
       </form>
 
-      <div className="auth-footer">
-        <span>New to NeuroScan AI?</span>
-        <button
-          type="button"
-          className="auth-link-btn"
-          onClick={onSwitchToRegister}
-          disabled={loading}
-        >
-          Create an account
-        </button>
-      </div>
+      {/* Footer Navigation */}
+      <div className="auth-card-footer">
+        <div className="footer-switch-prompt">
+          <span>Don't have a clinical User ID?</span>
+          <button
+            type="button"
+            className="footer-switch-btn"
+            onClick={onSwitchToRegister}
+            disabled={loading}
+          >
+            <UserPlus size={14} />
+            <span>Create New Account</span>
+          </button>
+        </div>
 
-      <div className="auth-security-notice">
-        <span>🔒 Secure Clinical Session • Dual-Encrypted Vault</span>
+        <div className="security-assurance-tag">
+          <Lock size={12} className="text-teal" />
+          <span>End-to-End Cryptographic Session • Zero Plaintext Storage</span>
+        </div>
       </div>
     </div>
   );
