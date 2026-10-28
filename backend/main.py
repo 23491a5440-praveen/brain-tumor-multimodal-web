@@ -13,7 +13,7 @@ import torch.nn.functional as F
 torch.set_num_threads(1)
 torch.set_num_interop_threads(1)
 from PIL import Image
-from fastapi import FastAPI, File, UploadFile, HTTPException, Response, status, Header
+from fastapi import FastAPI, File, UploadFile, HTTPException, Response, status, Header, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from torchvision import transforms
 
@@ -60,9 +60,9 @@ app.add_middleware(
 )
 
 try:
-    from backend.auth_routes import auth_router
+    from backend.auth_routes import auth_router, get_current_user
 except ImportError:
-    from auth_routes import auth_router
+    from auth_routes import auth_router, get_current_user
 app.include_router(auth_router)
 
 
@@ -161,16 +161,20 @@ transform = transforms.Compose([
 ])
 
 
+MAX_UPLOAD_SIZE = 15 * 1024 * 1024  # 15 MB limit per scan
+
 def prepare_image(data: bytes, modality_name: str = "Image"):
     if not data or len(data) == 0:
         raise HTTPException(status_code=400, detail=f"{modality_name} file is empty (0 bytes).")
+    if len(data) > MAX_UPLOAD_SIZE:
+        raise HTTPException(status_code=400, detail=f"{modality_name} exceeds maximum allowed size of 15 MB.")
 
     try:
         img_buf = io.BytesIO(data)
         with Image.open(img_buf) as img:
-            img.load()  # Decode pixels to catch corrupted or truncated image streams
             rgb_img = img.convert("RGB")
-        return transform(rgb_img).unsqueeze(0).to(device)
+            tensor = transform(rgb_img).unsqueeze(0).to(device)
+        return tensor
     except HTTPException:
         raise
     except (Image.UnidentifiedImageError, ValueError):
@@ -254,7 +258,8 @@ def health(response: Response):
 async def predict(
     ct_image: UploadFile | None = File(default=None),
     mri_image: UploadFile | None = File(default=None),
-    x_model_variant: str | None = Header(default=None, alias="X-Model-Variant")
+    x_model_variant: str | None = Header(default=None, alias="X-Model-Variant"),
+    current_user: dict = Depends(get_current_user)
 ):
     variant = x_model_variant.strip().lower() if x_model_variant else None
     is_experimental = (variant == "experimental")
@@ -287,8 +292,8 @@ async def predict(
 
 
     # Validate that at least one scan is provided
-    has_ct = ct_image is not None and bool(ct_image.filename)
-    has_mri = mri_image is not None and bool(mri_image.filename)
+    has_ct = ct_image is not None and hasattr(ct_image, "filename") and bool(ct_image.filename)
+    has_mri = mri_image is not None and hasattr(mri_image, "filename") and bool(mri_image.filename)
 
     if not has_ct and not has_mri:
         raise HTTPException(status_code=400, detail="At least one brain scan (CT or MRI) must be uploaded.")
@@ -297,21 +302,31 @@ async def predict(
     if has_ct:
         if not ct_image.content_type or not ct_image.content_type.startswith("image/"):
             raise HTTPException(status_code=400, detail="CT scan must be an image file.")
-        ct_data = await ct_image.read()
+        if hasattr(ct_image, "file") and hasattr(ct_image.file, "read"):
+            ct_data = ct_image.file.read()
+        else:
+            ct_data = await ct_image.read()
         ct_tensor = prepare_image(ct_data, modality_name="CT scan")
+        del ct_data
+        gc.collect()
 
     mri_tensor = None
     if has_mri:
         if not mri_image.content_type or not mri_image.content_type.startswith("image/"):
             raise HTTPException(status_code=400, detail="MRI scan must be an image file.")
-        mri_data = await mri_image.read()
+        if hasattr(mri_image, "file") and hasattr(mri_image.file, "read"):
+            mri_data = mri_image.file.read()
+        else:
+            mri_data = await mri_image.read()
         mri_tensor = prepare_image(mri_data, modality_name="MRI scan")
+        del mri_data
+        gc.collect()
 
     if ct_tensor is None and mri_tensor is None:
         raise HTTPException(status_code=400, detail="At least one valid scan (CT or MRI) must be provided.")
 
     # Phase 1: Model Prediction (supports CT-only, MRI-only, and Multimodal via zero-imputation)
-    with torch.no_grad():
+    with torch.inference_mode():
         outputs = active_model(
             ct_images=ct_tensor,
             mri_images=mri_tensor
@@ -320,14 +335,18 @@ async def predict(
         predicted_class = torch.argmax(probabilities, dim=1).item()
         confidence = probabilities[0, predicted_class].item() * 100
 
+    del ct_tensor
+    del mri_tensor
+    gc.collect()
+
     ct_base64 = None
     mri_base64 = None
 
     label = "Tumor" if predicted_class == 1 else "Healthy"
 
-    if ct_tensor is not None and mri_tensor is not None:
+    if has_ct and has_mri:
         explanation = "The prediction is based on learned image features extracted from the uploaded CT and MRI scans using EfficientNet-B0 and combined through late fusion. This result is not a medical diagnosis."
-    elif ct_tensor is not None:
+    elif has_ct:
         explanation = "The prediction is based on learned image features extracted from the uploaded CT scan using EfficientNet-B0 (with zero-imputation for MRI). This result is not a medical diagnosis."
     else:
         explanation = "The prediction is based on learned image features extracted from the uploaded MRI scan using EfficientNet-B0 (with zero-imputation for CT). This result is not a medical diagnosis."

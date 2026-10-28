@@ -1,27 +1,8 @@
-import { useState } from 'react';
 import { Activity, ShieldCheck, Cpu, Brain, Sparkles } from 'lucide-react';
 import LoginView from './LoginView';
-import RegisterView from './RegisterView';
-import ForgotPasswordView from './ForgotPasswordView';
 import './Auth.css';
 
 export default function AuthPortal({ onLoginSuccess }) {
-  const [activeView, setActiveView] = useState('login'); // 'login' | 'register' | 'forgot-password'
-  const [prefilledUserId, setPrefilledUserId] = useState('');
-
-  const handleRegisterSuccess = (userId) => {
-    if (userId) {
-      setPrefilledUserId(userId);
-    }
-  };
-
-  const handleSwitchToLogin = (userId = '') => {
-    if (userId) {
-      setPrefilledUserId(userId);
-    }
-    setActiveView('login');
-  };
-
   return (
     <div className="auth-master-wrapper">
       {/* Dynamic Background Effects */}
@@ -53,7 +34,7 @@ export default function AuthPortal({ onLoginSuccess }) {
           </div>
 
           <p className="brand-description">
-            Secure clinical authentication platform connecting hospitals, diagnostic centers, medical students, and oncology researchers to advanced multimodal MRI/CT classification networks.
+            Restricted clinical intelligence platform connecting authorized radiologists and researchers to advanced multimodal MRI/CT classification networks.
           </p>
 
           <div className="brand-features-list">
@@ -73,7 +54,7 @@ export default function AuthPortal({ onLoginSuccess }) {
               </div>
               <div>
                 <h4 className="feature-title">Intelligent Brain Scan Analysis</h4>
-                <p className="feature-desc">AI-powered CT and MRI classification with clear diagnostic results.</p>
+                <p className="feature-desc">AI-powered CT and MRI classification with high confidence diagnostic outputs.</p>
               </div>
             </div>
 
@@ -82,16 +63,16 @@ export default function AuthPortal({ onLoginSuccess }) {
                 <ShieldCheck size={18} className="text-teal" />
               </div>
               <div>
-                <h4 className="feature-title">Secure Role-Based Access</h4>
-                <p className="feature-desc">Unique clinical User IDs with protected password access and PIN recovery.</p>
+                <h4 className="feature-title">Restricted Clinical Access</h4>
+                <p className="feature-desc">Authorized credentials required. Public registration is strictly disabled.</p>
               </div>
             </div>
           </div>
 
           <div className="brand-footer-specs">
             <div className="spec-metric">
-              <span className="spec-value">4</span>
-              <span className="spec-label">Clinical Roles</span>
+              <span className="spec-value">5</span>
+              <span className="spec-label">Authorized Accounts</span>
             </div>
             <div className="spec-divider"></div>
             <div className="spec-metric">
@@ -106,29 +87,9 @@ export default function AuthPortal({ onLoginSuccess }) {
           </div>
         </aside>
 
-        {/* Right Column: Interactive Portal Card */}
+        {/* Right Column: Restricted Login Form */}
         <main className="auth-form-card-container">
-          {activeView === 'login' && (
-            <LoginView
-              initialUserId={prefilledUserId}
-              onSuccess={onLoginSuccess}
-              onSwitchToRegister={() => setActiveView('register')}
-              onSwitchToForgotPassword={() => setActiveView('forgot-password')}
-            />
-          )}
-
-          {activeView === 'register' && (
-            <RegisterView
-              onRegisteredSuccess={handleRegisterSuccess}
-              onSwitchToLogin={handleSwitchToLogin}
-            />
-          )}
-
-          {activeView === 'forgot-password' && (
-            <ForgotPasswordView
-              onSwitchToLogin={handleSwitchToLogin}
-            />
-          )}
+          <LoginView onSuccess={onLoginSuccess} />
         </main>
       </div>
     </div>

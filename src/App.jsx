@@ -1,8 +1,12 @@
 import { useState, useRef, useEffect } from 'react';
-import { UploadCloud, Activity, BrainCircuit, X, Image as ImageIcon, ChevronRight, Settings, Layers, GitMerge, CheckCircle, Network, Info, AlertTriangle } from 'lucide-react';
+import { UploadCloud, Activity, BrainCircuit, X, Image as ImageIcon, ChevronRight, Settings, Layers, GitMerge, CheckCircle, Network, Info, AlertTriangle, LogOut } from 'lucide-react';
 import './index.css';
+import AuthPortal from './components/auth/AuthPortal';
+import { authService } from './services/authService';
 
 function App() {
+  const [user, setUser] = useState(null);
+  const [isAuthChecking, setIsAuthChecking] = useState(true);
   const [ctImage, setCtImage] = useState(null);
   const [mriImage, setMriImage] = useState(null);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
@@ -16,7 +20,26 @@ function App() {
   const ctInputRef = useRef(null);
   const mriInputRef = useRef(null);
 
+  useEffect(() => {
+    let isMounted = true;
+    const verifyUser = async () => {
+      try {
+        const currentUser = await authService.getMe();
+        if (isMounted) setUser(currentUser);
+      } catch {
+        if (isMounted) setUser(null);
+      } finally {
+        if (isMounted) setIsAuthChecking(false);
+      }
+    };
+    verifyUser();
+    return () => { isMounted = false; };
+  }, []);
 
+  const handleLogout = async () => {
+    await authService.logout();
+    setUser(null);
+  };
 
   useEffect(() => {
     const handleScroll = () => {
@@ -138,13 +161,24 @@ function App() {
         );
       const apiBaseUrl = String(rawApiUrl).replace(/\/+$/, '');
 
+      const token = authService.getToken();
+      const headers = {};
+      if (token) {
+        headers['Authorization'] = `Bearer ${token}`;
+      }
       
       const response = await fetch(`${apiBaseUrl}/predict`, {
         method: 'POST',
+        headers: headers,
         body: formData
       });
       
       if (!response.ok) {
+        if (response.status === 401) {
+          authService.clearSession();
+          setUser(null);
+          throw new Error('Your session has expired or is unauthorized. Please sign in again.');
+        }
         let serverErrorMsg = 'Analysis service is unavailable. Please try again.';
         try {
           const errData = await response.json();
@@ -172,7 +206,18 @@ function App() {
     }
   };
 
+  if (isAuthChecking) {
+    return (
+      <div className="auth-wrapper" style={{ display: 'flex', flexDirection: 'column', gap: '1rem', alignItems: 'center', justifyContent: 'center', minHeight: '100vh', background: '#060b14' }}>
+        <div className="loader" style={{ width: 36, height: 36, borderWidth: 3 }}></div>
+        <p style={{ color: 'var(--text-secondary)', fontSize: '0.9rem' }}>Verifying NeuroScan AI session...</p>
+      </div>
+    );
+  }
 
+  if (!user) {
+    return <AuthPortal onLoginSuccess={(authenticatedUser) => setUser(authenticatedUser)} />;
+  }
 
   return (
     <div className="app-container">
@@ -214,7 +259,23 @@ function App() {
           <a href="#how-it-works" className={`nav-link ${activeSection === 'how-it-works' ? 'active' : ''}`}>How It Works</a>
           <a href="#about" className={`nav-link ${activeSection === 'about' ? 'active' : ''}`}>About</a>
 
-
+          <div className="user-profile-nav" style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', marginLeft: '0.5rem' }}>
+            <div className="user-badge-pill" style={{ display: 'flex', alignItems: 'center', gap: '6px', background: 'rgba(13, 23, 42, 0.75)', border: '1px solid rgba(45, 212, 191, 0.25)', padding: '5px 12px', borderRadius: '16px', fontSize: '0.85rem' }}>
+              <Activity size={14} style={{ color: 'var(--teal-400)' }} />
+              <span style={{ color: 'var(--text-primary)', fontWeight: 600 }}>{user.full_name || user.user_id}</span>
+              <span className="user-role-tag" style={{ color: 'var(--teal-300)', fontSize: '0.75rem', borderLeft: '1px solid rgba(255,255,255,0.15)', paddingLeft: '6px' }}>{user.user_id}</span>
+            </div>
+            <button
+              type="button"
+              className="signout-btn"
+              onClick={handleLogout}
+              title="Sign out of NeuroScan AI"
+              style={{ display: 'inline-flex', alignItems: 'center', gap: '5px', background: 'rgba(239, 68, 68, 0.1)', border: '1px solid rgba(239, 68, 68, 0.3)', color: '#fca5a5', padding: '5px 10px', borderRadius: '8px', cursor: 'pointer', fontSize: '0.8rem', fontWeight: 500 }}
+            >
+              <LogOut size={13} />
+              <span>Sign Out</span>
+            </button>
+          </div>
         </nav>
       </header>
 
@@ -398,6 +459,7 @@ function App() {
                         {results.backendData.confidence}%
                       </h3>
                     </div>
+
                     <div style={{ width: '100%', height: '8px', background: 'rgba(255,255,255,0.1)', borderRadius: '4px', overflow: 'hidden' }}>
                       <div style={{ 
                         height: '100%', 

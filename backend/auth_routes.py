@@ -1,63 +1,51 @@
 import logging
 import secrets
+import time
 from datetime import datetime, timedelta, timezone
-from typing import Optional
+from typing import Optional, Dict, List
 
 from fastapi import APIRouter, HTTPException, Depends, Header, Request, status
 from pydantic import BaseModel, Field
 
 try:
-    from backend.database import get_db, init_db
-    from backend.auth_utils import (
-        generate_user_id,
-        validate_password_strength,
-        validate_recovery_pin,
-        hash_credential,
-        verify_credential,
-        generate_session_token,
-    )
+    from backend.database import get_db, init_db, AUTHORIZED_ACCOUNTS
+    from backend.auth_utils import verify_credential, generate_session_token
 except ImportError:
-    from database import get_db, init_db
-    from auth_utils import (
-        generate_user_id,
-        validate_password_strength,
-        validate_recovery_pin,
-        hash_credential,
-        verify_credential,
-        generate_session_token,
-    )
+    from database import get_db, init_db, AUTHORIZED_ACCOUNTS
+    from auth_utils import verify_credential, generate_session_token
 
 logger = logging.getLogger("neuroscan.auth.routes")
 auth_router = APIRouter(prefix="/api/auth", tags=["Authentication"])
 
-# Initialize schema
+# Initialize schema and seed accounts
 init_db()
 
-ROLE_LABELS = {
-    "hospital": "Hospital",
-    "clinic": "Clinic / Diagnostic Centre",
-    "student": "Student",
-    "researcher": "Researcher"
-}
+# Rate limiting for login attempts: user_or_ip -> list of failure timestamps
+FAILED_ATTEMPTS: Dict[str, List[float]] = {}
+MAX_FAILED_ATTEMPTS = 5
+LOCKOUT_WINDOW_SECONDS = 15 * 60  # 15 minutes
 
-class RegisterRequest(BaseModel):
-    role: str = Field(..., description="Role: 'hospital', 'clinic', 'student', or 'researcher'")
-    full_name: str = Field(..., description="Full name or authorized contact name")
-    organization: str = Field(..., description="Institution, hospital, clinic, or university name")
-    password: str = Field(..., description="Password (min 8 chars, 1 letter, 1 number)")
-    confirm_password: str = Field(..., description="Password confirmation")
-    recovery_pin: str = Field(..., description="4-16 char Recovery PIN chosen by user")
-    confirm_recovery_pin: str = Field(..., description="Recovery PIN confirmation")
+def is_rate_limited(key: str) -> bool:
+    now = time.time()
+    attempts = FAILED_ATTEMPTS.get(key, [])
+    # Filter attempts within the window
+    recent_attempts = [t for t in attempts if now - t < LOCKOUT_WINDOW_SECONDS]
+    FAILED_ATTEMPTS[key] = recent_attempts
+    return len(recent_attempts) >= MAX_FAILED_ATTEMPTS
+
+def record_failed_attempt(key: str):
+    now = time.time()
+    attempts = FAILED_ATTEMPTS.get(key, [])
+    attempts.append(now)
+    FAILED_ATTEMPTS[key] = [t for t in attempts if now - t < LOCKOUT_WINDOW_SECONDS]
+
+def clear_failed_attempts(key: str):
+    if key in FAILED_ATTEMPTS:
+        del FAILED_ATTEMPTS[key]
 
 class LoginRequest(BaseModel):
-    user_id: str = Field(..., description="Permanent NeuroScan User ID (e.g. NS-STU-123456)")
+    user_id: str = Field(..., description="Authorized NeuroScan User ID (e.g. 23491a5440)")
     password: str = Field(..., description="Account password")
-
-class ResetPasswordRequest(BaseModel):
-    user_id: str = Field(..., description="Permanent NeuroScan User ID")
-    recovery_pin: str = Field(..., description="Recovery PIN chosen during registration")
-    new_password: str = Field(..., description="New password")
-    confirm_password: str = Field(..., description="Confirmation of new password")
 
 def get_current_user(authorization: Optional[str] = Header(default=None)):
     """FastAPI dependency to extract and validate the authenticated session."""
@@ -77,7 +65,7 @@ def get_current_user(authorization: Optional[str] = Header(default=None)):
     with get_db() as conn:
         cursor = conn.cursor()
         cursor.execute("""
-            SELECT s.token, s.expires_at, u.user_id, u.role, u.full_name, u.organization, u.created_at
+            SELECT s.token, s.expires_at, u.user_id, u.full_name, u.role, u.created_at
             FROM sessions s
             JOIN users u ON s.user_id = u.user_id
             WHERE s.token = ?
@@ -109,108 +97,26 @@ def get_current_user(authorization: Optional[str] = Header(default=None)):
 
         return {
             "user_id": row["user_id"],
-            "role": row["role"],
             "full_name": row["full_name"],
-            "organization": row["organization"],
+            "role": row["role"],
             "created_at": row["created_at"],
             "session_token": token
         }
 
 
-@auth_router.post("/register", status_code=status.HTTP_201_CREATED)
-def register(req: RegisterRequest):
-    """Registers a new user and generates a permanent User ID with recovery PIN."""
-    role = req.role.strip().lower()
-    if role not in ROLE_LABELS:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Role must be one of: 'hospital', 'clinic', 'student', or 'researcher'."
-        )
-
-    full_name = req.full_name.strip()
-    if not full_name:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Full name is required."
-        )
-
-    organization = req.organization.strip()
-    if not organization:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Institution / Hospital / College name is required."
-        )
-
-    if req.password != req.confirm_password:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Passwords do not match."
-        )
-
-    is_strong, strength_err = validate_password_strength(req.password)
-    if not is_strong:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=strength_err
-        )
-
-    if req.recovery_pin != req.confirm_recovery_pin:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Recovery PINs do not match."
-        )
-
-    is_pin_valid, pin_err = validate_recovery_pin(req.recovery_pin)
-    if not is_pin_valid:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=pin_err
-        )
-
-    # Hash password and recovery PIN
-    pwd_hash, pwd_salt = hash_credential(req.password)
-    pin_hash, pin_salt = hash_credential(req.recovery_pin.strip())
-
-    with get_db() as conn:
-        cursor = conn.cursor()
-        
-        # Generate unique user_id
-        for _ in range(10):
-            candidate_id = generate_user_id(role)
-            cursor.execute("SELECT 1 FROM users WHERE user_id = ?", (candidate_id,))
-            if not cursor.fetchone():
-                user_id = candidate_id
-                break
-        else:
-            user_id = f"{generate_user_id(role)}-{secrets.token_hex(2)}"
-
-        cursor.execute("""
-            INSERT INTO users (
-                user_id, role, full_name, organization, 
-                password_hash, salt, recovery_pin_hash, recovery_pin_salt
-            )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-        """, (
-            user_id, role, full_name, organization,
-            pwd_hash, pwd_salt, pin_hash, pin_salt
-        ))
-
-    logger.info("New %s account registered: user_id=%s", role, user_id)
-    role_label = ROLE_LABELS.get(role, role.capitalize())
-    return {
-        "status": "success",
-        "user_id": user_id,
-        "role": role,
-        "full_name": full_name,
-        "organization": organization,
-        "message": f"{role_label} account created successfully! Save your User ID: {user_id}"
-    }
-
-
 @auth_router.post("/login")
 def login(req: LoginRequest, request: Request):
-    """Authenticates using User ID and password, returns session token."""
-    user_id = req.user_id.strip().upper()
+    """Authenticates one of the 5 authorized User IDs and passwords with rate limiting."""
+    user_id = req.user_id.strip().lower()
+    client_ip = request.client.host if request.client else "unknown"
+    rate_key = f"{user_id}:{client_ip}"
+
+    if is_rate_limited(rate_key) or is_rate_limited(client_ip):
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail="Too many failed login attempts. Please wait 15 minutes before trying again."
+        )
+
     if not user_id or not req.password:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -220,17 +126,24 @@ def login(req: LoginRequest, request: Request):
     with get_db() as conn:
         cursor = conn.cursor()
         cursor.execute("""
-            SELECT user_id, role, full_name, organization, password_hash, salt
+            SELECT user_id, full_name, role, password_hash, salt
             FROM users
             WHERE user_id = ?
         """, (user_id,))
         user = cursor.fetchone()
 
         if not user or not verify_credential(req.password, user["password_hash"], user["salt"]):
+            record_failed_attempt(rate_key)
+            record_failed_attempt(client_ip)
+            logger.warning("Failed login attempt for user_id=%s from IP=%s", user_id, client_ip)
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Invalid User ID or password."
+                detail="Invalid User ID or password. Access is restricted to authorized accounts."
             )
+
+        # Successful login: clear failure tracking
+        clear_failed_attempts(rate_key)
+        clear_failed_attempts(client_ip)
 
         # Create session
         token = generate_session_token()
@@ -242,16 +155,16 @@ def login(req: LoginRequest, request: Request):
             VALUES (?, ?, ?, ?)
         """, (token, user["user_id"], expires_at.isoformat(), user_agent))
 
-    logger.info("User logged in successfully: user_id=%s", user["user_id"])
+    logger.info("Authorized user logged in successfully: user_id=%s", user["user_id"])
     return {
         "status": "success",
         "message": "Login successful.",
         "token": token,
+        "session_token": token,
         "user": {
             "user_id": user["user_id"],
-            "role": user["role"],
             "full_name": user["full_name"],
-            "organization": user["organization"]
+            "role": user["role"]
         }
     }
 
@@ -263,9 +176,8 @@ def get_profile(current_user: dict = Depends(get_current_user)):
         "status": "success",
         "user": {
             "user_id": current_user["user_id"],
-            "role": current_user["role"],
             "full_name": current_user["full_name"],
-            "organization": current_user["organization"]
+            "role": current_user["role"]
         }
     }
 
@@ -278,90 +190,19 @@ def logout(current_user: dict = Depends(get_current_user)):
     return {"status": "success", "message": "Logged out successfully."}
 
 
-@auth_router.post("/reset-password")
-def reset_password(req: ResetPasswordRequest):
-    """Resets password using User ID and Recovery PIN with rate-limiting."""
-    user_id = req.user_id.strip().upper()
-    pin = req.recovery_pin.strip()
+@auth_router.post("/register", status_code=status.HTTP_403_FORBIDDEN)
+def register_disabled():
+    """Explicitly disables public self-service registration."""
+    raise HTTPException(
+        status_code=status.HTTP_403_FORBIDDEN,
+        detail="Self-service registration is disabled. Access is restricted. Contact dharmavarapraaveenkumarreddy@gmail.com to request an account."
+    )
 
-    if not user_id or not pin:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="User ID and Recovery PIN are required."
-        )
 
-    if req.new_password != req.confirm_password:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="New passwords do not match."
-        )
-
-    is_strong, strength_err = validate_password_strength(req.new_password)
-    if not is_strong:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=strength_err
-        )
-
-    with get_db() as conn:
-        cursor = conn.cursor()
-        cursor.execute("""
-            SELECT user_id, recovery_pin_hash, recovery_pin_salt, failed_reset_attempts, last_failed_attempt
-            FROM users
-            WHERE user_id = ?
-        """, (user_id,))
-        user = cursor.fetchone()
-
-        if not user:
-            # Generic error to prevent enumeration
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Invalid User ID or Recovery PIN."
-            )
-
-        # Rate limiting: max 5 failed attempts within 15 minutes
-        failed_count = user["failed_reset_attempts"] or 0
-        last_failed = user["last_failed_attempt"]
-        if failed_count >= 5 and last_failed:
-            try:
-                last_dt = datetime.fromisoformat(last_failed)
-                if last_dt.tzinfo is None:
-                    last_dt = last_dt.replace(tzinfo=timezone.utc)
-                if (datetime.now(timezone.utc) - last_dt).total_seconds() < 900:
-                    raise HTTPException(
-                        status_code=status.HTTP_429_TOO_MANY_REQUESTS,
-                        detail="Too many failed recovery attempts. Please wait 15 minutes before trying again."
-                    )
-            except HTTPException:
-                raise
-            except Exception:
-                pass
-
-        if not verify_credential(pin, user["recovery_pin_hash"], user["recovery_pin_salt"]):
-            now_iso = datetime.now(timezone.utc).isoformat()
-            cursor.execute("""
-                UPDATE users
-                SET failed_reset_attempts = failed_reset_attempts + 1, last_failed_attempt = ?
-                WHERE user_id = ?
-            """, (now_iso, user_id))
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Invalid User ID or Recovery PIN."
-            )
-
-        # PIN verified! Update password and clear sessions
-        pwd_hash, pwd_salt = hash_credential(req.new_password)
-        now_iso = datetime.now(timezone.utc).isoformat()
-        cursor.execute("""
-            UPDATE users
-            SET password_hash = ?, salt = ?, failed_reset_attempts = 0, last_failed_attempt = NULL, updated_at = ?
-            WHERE user_id = ?
-        """, (pwd_hash, pwd_salt, now_iso, user_id))
-
-        cursor.execute("DELETE FROM sessions WHERE user_id = ?", (user_id,))
-
-    logger.info("Password successfully reset via recovery PIN for user_id=%s", user_id)
-    return {
-        "status": "success",
-        "message": "Password reset successfully. You can now sign in with your User ID and new password."
-    }
+@auth_router.post("/reset-password", status_code=status.HTTP_403_FORBIDDEN)
+def reset_password_disabled():
+    """Explicitly disables self-service password reset."""
+    raise HTTPException(
+        status_code=status.HTTP_403_FORBIDDEN,
+        detail="Self-service password reset is disabled. Contact the developer at dharmavarapraaveenkumarreddy@gmail.com."
+    )
